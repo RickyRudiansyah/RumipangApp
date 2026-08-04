@@ -1,0 +1,54 @@
+name: rumipang_kasir
+description: Aplikasi kasir Rumipang untuk tablet Android + printer termal Bluetooth.
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.6.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Tanggal & label Material dalam bahasa Indonesia
+  flutter_localizations:
+    sdk: flutter
+
+  # State management (SPEC §10)
+  flutter_riverpod: ^3.4.2
+
+  # Auth + realtime saja. Semua aksi lewat REST (SPEC §3).
+  supabase_flutter: ^2.16.0
+
+  # REST client
+  http: ^1.5.0
+
+  # Printer termal Bluetooth CLASSIC / SPP.
+  # JANGAN ganti ke flutter_blue_plus -> itu BLE, Panda PRJ-R58D tidak akan terdeteksi.
+  print_bluetooth_thermal: ^1.2.2
+
+  # Foreground service supaya loop cetak tidak dimatikan sistem (SPEC §8.3)
+  flutter_foreground_task: ^10.0.0
+
+  # Layar tetap menyala saat tablet dipakai seharian (SPEC §2)
+  wakelock_plus: ^1.7.0
+
+  # Izin runtime Android 13: BLUETOOTH_CONNECT / BLUETOOTH_SCAN / POST_NOTIFICATIONS
+  permission_handler: ^13.0.0
+
+  # Cache offline, MAC printer tersimpan, antrian aksi tertunda
+  shared_preferences: ^2.5.3
+
+  # Format tanggal & rupiah lokal id_ID.
+  # Sengaja `any`: flutter_localizations mematok versi intl secara ketat, dan
+  # memasang batas sendiri di sini membuat `pub get` gagal setiap kali Flutter
+  # di-upgrade.
+  intl: any
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true

@@ -1,0 +1,12 @@
+include: package:flutter_lints/flutter.yaml
+
+linter:
+  rules:
+    - always_declare_return_types
+    - avoid_empty_else
+    - prefer_final_locals
+    - unawaited_futures
+
+analyzer:
+  errors:
+    invalid_annotation_target: ignore

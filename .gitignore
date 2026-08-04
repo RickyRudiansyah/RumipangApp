@@ -1,0 +1,24 @@
+.dart_tool/
+.packages
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+pubspec.lock
+
+.idea/
+.vscode/
+*.iml
+
+android/.gradle/
+android/local.properties
+android/key.properties
+android/app/upload-keystore.jks
+*.jks
+
+.DS_Store
+
+# Jangan pernah commit rahasia server.
+# SUPABASE_SERVICE_ROLE_KEY / MIDTRANS_SERVER_KEY / PRINT_DEVICE_TOKEN
+# tidak boleh ada di repo ini sama sekali.
+.env
+.env.*

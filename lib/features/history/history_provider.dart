@@ -35,7 +35,7 @@ final historyQueryProvider =
     NotifierProvider<HistoryQueryNotifier, String>(HistoryQueryNotifier.new);
 
 final filteredHistoryProvider = Provider<List<OrderModel>>((ref) {
-  final all = ref.watch(historyProvider).valueOrNull ?? const <OrderModel>[];
+  final all = ref.watch(historyProvider).value ?? const <OrderModel>[];
   final query = ref.watch(historyQueryProvider).trim().toLowerCase();
   if (query.isEmpty) return all;
   return all.where((o) {

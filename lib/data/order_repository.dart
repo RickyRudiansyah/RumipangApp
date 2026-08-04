@@ -35,10 +35,6 @@ class OrderRepository {
   Future<List<OrderModel>> cashierBoard() async =>
       _parseList(await _api.get('/api/orders', query: {'mode': 'cashier'}));
 
-  /// Board dapur: hanya `QUEUED` & `PROCESSING`.
-  Future<List<OrderModel>> kitchenBoard() async =>
-      _parseList(await _api.get('/api/orders'));
-
   /// Arsip + dibatalkan.
   Future<List<OrderModel>> history() async =>
       _parseList(await _api.get('/api/orders/history'));
@@ -50,22 +46,10 @@ class OrderRepository {
     return MarkPaidResult(printQueued: asBool(asMap(res)['print_queued']));
   }
 
-  Future<void> setStatus(
-    String orderId,
-    OrderStatus status, {
-    int? estimatedMinutes,
-  }) =>
-      _api.patch('/api/orders/$orderId/status', body: {
-        'status': status.wire,
-        if (estimatedMinutes != null) 'estimated_minutes': estimatedMinutes,
-      });
-
-  /// **Menambah** waktu dari ETA yang sedang berjalan, bukan menimpa dari
-  /// sekarang (API-CONTRACT §3). Rentang yang diterima server: 1-1440 menit.
-  Future<void> updateEta(String orderId, int minutes) =>
-      _api.patch('/api/orders/$orderId/update-eta', body: {
-        'estimated_minutes': minutes.clamp(1, 1440),
-      });
+  // Catatan: `setStatus` dan `updateEta` sengaja dihapus. Alur dapur (ETA,
+  // "mulai proses", "sudah diantar") tidak lagi ada di aplikasi - order cukup
+  // masuk lalu dibayar. Endpointnya boleh tetap hidup di server untuk web;
+  // aplikasi hanya berhenti memanggilnya (BACKEND-ADDITIONS.md §7).
 
   Future<void> cancel(String orderId, String reason) =>
       _api.patch('/api/orders/$orderId/cancel', body: {'reason': reason});

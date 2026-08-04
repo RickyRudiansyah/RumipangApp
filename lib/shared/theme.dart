@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'app_theme_preset.dart';
+
 /// Tema untuk tablet 10,4" landscape yang dipakai berjam-jam di ruangan terang.
 ///
 /// Prinsipnya: kontras tinggi, target sentuh besar, tanpa animasi berat -
@@ -9,6 +11,10 @@ class AppTheme {
   const AppTheme._();
 
   static const Color brand = Color(0xFF7B3F00); // cokelat kopi
+
+  // Warna semantik. **Tidak ikut berubah saat tema event diganti** - merah
+  // harus selalu berarti "belum bayar". Tema Natal yang membuat semuanya
+  // merah akan membuat penanda belum-bayar hilang di antara dekorasi.
   static const Color paid = Color(0xFF1B7F4B);
   static const Color unpaid = Color(0xFFC62828);
   static const Color warn = Color(0xFFE07A00);
@@ -24,9 +30,11 @@ class AppTheme {
         border: Border.all(color: outline ?? border),
       );
 
-  static ThemeData build() {
+  /// [preset] datang dari `app_settings.theme` di server, supaya aplikasi dan
+  /// web berganti tema bersamaan (BACKEND-ADDITIONS.md §6).
+  static ThemeData build([ThemePreset preset = ThemePreset.normal]) {
     final scheme = ColorScheme.fromSeed(
-      seedColor: brand,
+      seedColor: preset.seed,
       brightness: Brightness.light,
     );
 

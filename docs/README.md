@@ -16,6 +16,12 @@ disimpan di sini supaya repo ini tetap mandiri.
 selama header `Authorization: Bearer` belum diterima backend, seluruh endpoint
 staff membalas 401.
 
+## Ditulis di repo ini
+
+| Berkas | Isi |
+|---|---|
+| [BACKEND-ADDITIONS.md](BACKEND-ADDITIONS.md) | Tabel Supabase + endpoint REST yang dibutuhkan dashboard admin (HPP, stok bahan, jatah makan, laporan, tema event). Ditujukan untuk agent yang mengurus repo web. |
+
 ## Rujukan silang ke kode
 
 | Bagian dokumen | Diterapkan di |

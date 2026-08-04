@@ -4,19 +4,23 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'features/auth/login_page.dart';
 import 'features/auth/staff_provider.dart';
+import 'features/settings/theme_provider.dart';
 import 'features/shell/shell_page.dart';
 import 'shared/theme.dart';
 import 'shared/widgets.dart';
 
-class RumipangKasirApp extends StatelessWidget {
+class RumipangKasirApp extends ConsumerWidget {
   const RumipangKasirApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    // Tema event diambil dari server supaya aplikasi dan web berganti bersamaan.
+    final preset = ref.watch(activeThemeProvider);
+
     return MaterialApp(
       title: 'Rumipang Kasir',
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.build(),
+      theme: AppTheme.build(preset),
       locale: const Locale('id', 'ID'),
       supportedLocales: const [Locale('id', 'ID'), Locale('en', 'US')],
       localizationsDelegates: const [

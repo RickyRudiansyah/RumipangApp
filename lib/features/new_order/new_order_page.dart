@@ -251,7 +251,7 @@ class _CartPaneState extends ConsumerState<_CartPane> {
   @override
   Widget build(BuildContext context) {
     final cart = ref.watch(cartProvider);
-    final tables = ref.watch(tablesProvider).valueOrNull ?? const [];
+    final tables = ref.watch(tablesProvider).value ?? const [];
 
     return Container(
       color: Colors.white,

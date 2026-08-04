@@ -19,6 +19,7 @@ class MenuItemModel {
     required this.id,
     required this.name,
     required this.price,
+    required this.costPrice,
     required this.isAvailable,
     required this.isSoldOut,
     this.categoryId,
@@ -31,6 +32,7 @@ class MenuItemModel {
         id: asString(json['id']),
         name: asString(json['name'], 'Menu'),
         price: asInt(json['price']),
+        costPrice: asInt(json['cost_price']),
         isAvailable: asBool(json['is_available'], true),
         isSoldOut: asBool(json['is_sold_out']),
         categoryId: asStringOrNull(json['category_id']),
@@ -43,6 +45,11 @@ class MenuItemModel {
   final String id;
   final String name;
   final int price;
+
+  /// HPP per porsi, diisi manual owner. 0 berarti **belum diisi**, bukan
+  /// "modalnya gratis" - margin sengaja tidak ditampilkan untuk kasus ini.
+  final int costPrice;
+
   final bool isAvailable;
   final bool isSoldOut;
   final String? categoryId;
@@ -55,6 +62,24 @@ class MenuItemModel {
 
   String get categoryName => category?.name ?? 'Lainnya';
   int get categorySort => category?.sortOrder ?? 999;
+
+  // ------------------------------------------------------------------ HPP ---
+
+  bool get hasCost => costPrice > 0;
+
+  /// Laba kotor per porsi.
+  int get margin => price - costPrice;
+
+  /// Persentase margin terhadap harga jual. `null` kalau HPP belum diisi -
+  /// menampilkan "100%" untuk menu tanpa HPP itu menyesatkan.
+  double? get marginPercent {
+    if (!hasCost || price <= 0) return null;
+    return margin / price * 100;
+  }
+
+  /// Jual di bawah modal. Ditandai merah, tapi tidak diblokir - bisa saja
+  /// memang disengaja untuk menu promo.
+  bool get isLossMaking => hasCost && margin < 0;
 }
 
 class MenuVariation {

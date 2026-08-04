@@ -541,7 +541,7 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
     );
     if (!retry || !mounted) return;
 
-    final staff = ref.read(staffProvider).valueOrNull;
+    final staff = ref.read(staffProvider).value;
     try {
       await ref.read(printQueueProvider.notifier).reprintOrder(
             orderId: order.id,

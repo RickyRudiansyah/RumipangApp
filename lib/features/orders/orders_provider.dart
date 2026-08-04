@@ -2,7 +2,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/failure.dart';
 import '../../core/providers.dart';
-import '../../models/enums.dart';
 import '../../models/order.dart';
 import 'pending_actions.dart';
 
@@ -41,12 +40,11 @@ class TableGroup {
   bool get canArchive => orders.isNotEmpty && orders.every((o) => o.isSettled);
 }
 
-/// Sumber tunggal untuk board kasir **dan** board dapur.
+/// Sumber tunggal untuk board kasir.
 ///
-/// `GET /api/orders?mode=cashier` sudah memuat seluruh order aktif
-/// (QUEUED + PROCESSING + SERVED yang belum diarsip), jadi board dapur
-/// diturunkan dari data yang sama lewat [kitchenOrdersProvider]. Satu request,
-/// dan dua layar dijamin tidak pernah berbeda isi.
+/// `GET /api/orders?mode=cashier` memuat seluruh order aktif yang belum
+/// diarsipkan. Board dapur yang dulu diturunkan dari sini sudah dihapus -
+/// order cukup masuk lalu dibayar, tanpa langkah proses manual.
 class CashierBoardNotifier extends AsyncNotifier<BoardData> {
   static const _cacheKey = 'cashier';
 
@@ -104,25 +102,6 @@ class CashierBoardNotifier extends AsyncNotifier<BoardData> {
     await refresh();
   }
 
-  Future<void> startProcessing(OrderModel order, {int? estimatedMinutes}) async {
-    await ref.read(orderRepositoryProvider).setStatus(
-          order.id,
-          OrderStatus.processing,
-          estimatedMinutes: estimatedMinutes,
-        );
-    await refresh();
-  }
-
-  Future<void> markServed(OrderModel order) async {
-    await ref.read(orderRepositoryProvider).setStatus(order.id, OrderStatus.served);
-    await refresh();
-  }
-
-  Future<void> addEta(OrderModel order, int minutes) async {
-    await ref.read(orderRepositoryProvider).updateEta(order.id, minutes);
-    await refresh();
-  }
-
   /// Arsipkan seluruh order di satu meja.
   Future<void> archiveGroup(TableGroup group) async {
     final repo = ref.read(orderRepositoryProvider);
@@ -149,7 +128,7 @@ final cashierBoardProvider =
 
 /// Order dikelompokkan per meja, meja yang punya tagihan belum bayar didahulukan.
 final tableGroupsProvider = Provider<List<TableGroup>>((ref) {
-  final board = ref.watch(cashierBoardProvider).valueOrNull ?? BoardData.empty;
+  final board = ref.watch(cashierBoardProvider).value ?? BoardData.empty;
 
   final buckets = <String, List<OrderModel>>{};
   for (final order in board.orders) {
@@ -173,26 +152,8 @@ final tableGroupsProvider = Provider<List<TableGroup>>((ref) {
   return groups;
 });
 
-/// Board dapur: hanya QUEUED & PROCESSING, diturunkan dari board kasir.
-final kitchenOrdersProvider = Provider<List<OrderModel>>((ref) {
-  final board = ref.watch(cashierBoardProvider).valueOrNull ?? BoardData.empty;
-  final active = board.orders.where((o) => o.status.isActive).toList()
-    ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
-  return active;
-});
-
-final queuedOrdersProvider = Provider<List<OrderModel>>((ref) => ref
-    .watch(kitchenOrdersProvider)
-    .where((o) => o.status == OrderStatus.queued)
-    .toList());
-
-final processingOrdersProvider = Provider<List<OrderModel>>((ref) => ref
-    .watch(kitchenOrdersProvider)
-    .where((o) => o.status == OrderStatus.processing)
-    .toList());
-
 /// Jumlah order yang belum dibayar - dipakai lencana di navigasi.
 final unpaidCountProvider = Provider<int>((ref) {
-  final board = ref.watch(cashierBoardProvider).valueOrNull ?? BoardData.empty;
+  final board = ref.watch(cashierBoardProvider).value ?? BoardData.empty;
   return board.orders.where((o) => !o.paymentStatus.isPaid).length;
 });

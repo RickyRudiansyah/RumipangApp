@@ -7,9 +7,12 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 import '../../core/realtime_service.dart';
 import '../../shared/theme.dart';
 import '../../shared/widgets.dart';
+import '../admin/menu_admin_page.dart';
 import '../auth/staff_provider.dart';
 import '../history/history_page.dart';
-import '../kitchen/kitchen_page.dart';
+import '../inventory/inventory_page.dart';
+import '../inventory/inventory_provider.dart';
+import '../meals/staff_meals_page.dart';
 import '../new_order/new_order_page.dart';
 import '../orders/cashier_board_page.dart';
 import '../orders/orders_provider.dart';
@@ -17,6 +20,8 @@ import '../orders/pending_actions.dart';
 import '../printer/print_queue.dart';
 import '../printer/printer_provider.dart';
 import '../printer/printer_settings_page.dart';
+import '../reports/reports_page.dart';
+import '../settings/theme_settings_page.dart';
 
 /// Kerangka aplikasi: NavigationRail di kiri, layar aktif di kanan.
 ///
@@ -32,7 +37,9 @@ class ShellPage extends ConsumerStatefulWidget {
 class _ShellPageState extends ConsumerState<ShellPage> with WidgetsBindingObserver {
   int _index = 0;
 
-  static const _printerTabIndex = 4;
+  /// Harus mengikuti urutan `destinations` dan `IndexedStack` di bawah.
+  /// Indikator printer di TopBar melompat ke sini saat ditekan.
+  static const _printerTabIndex = 8;
 
   @override
   void initState() {
@@ -78,10 +85,11 @@ class _ShellPageState extends ConsumerState<ShellPage> with WidgetsBindingObserv
 
   @override
   Widget build(BuildContext context) {
-    final staff = ref.watch(staffProvider).valueOrNull;
+    final staff = ref.watch(staffProvider).value;
     final unpaid = ref.watch(unpaidCountProvider);
     final queue = ref.watch(printQueueProvider);
     final pending = ref.watch(pendingActionsProvider);
+    final lowStock = ref.watch(lowStockCountProvider);
 
     return Scaffold(
       body: SafeArea(
@@ -100,16 +108,32 @@ class _ShellPageState extends ConsumerState<ShellPage> with WidgetsBindingObserv
                   label: const Text('Kasir'),
                 ),
                 const NavigationRailDestination(
-                  icon: Icon(Icons.soup_kitchen),
-                  label: Text('Dapur'),
-                ),
-                const NavigationRailDestination(
                   icon: Icon(Icons.add_shopping_cart),
                   label: Text('Order'),
                 ),
                 const NavigationRailDestination(
                   icon: Icon(Icons.history),
                   label: Text('Riwayat'),
+                ),
+                const NavigationRailDestination(
+                  icon: Icon(Icons.restaurant_menu),
+                  label: Text('Menu'),
+                ),
+                NavigationRailDestination(
+                  icon: _badged(Icons.inventory_2, lowStock, AppTheme.warn),
+                  label: const Text('Stok'),
+                ),
+                const NavigationRailDestination(
+                  icon: Icon(Icons.bar_chart),
+                  label: Text('Laporan'),
+                ),
+                const NavigationRailDestination(
+                  icon: Icon(Icons.lunch_dining),
+                  label: Text('Jatah'),
+                ),
+                const NavigationRailDestination(
+                  icon: Icon(Icons.palette),
+                  label: Text('Tema'),
                 ),
                 NavigationRailDestination(
                   icon: _badged(
@@ -138,9 +162,13 @@ class _ShellPageState extends ConsumerState<ShellPage> with WidgetsBindingObserv
                       index: _index,
                       children: const [
                         CashierBoardPage(),
-                        KitchenPage(),
                         NewOrderPage(),
                         HistoryPage(),
+                        MenuAdminPage(),
+                        InventoryPage(),
+                        ReportsPage(),
+                        StaffMealsPage(),
+                        ThemeSettingsPage(),
                         PrinterSettingsPage(),
                       ],
                     ),

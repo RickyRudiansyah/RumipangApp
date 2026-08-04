@@ -117,5 +117,5 @@ final staffProvider =
 
 /// Ringkasan untuk UI: sudah login sebagai staff aktif atau belum.
 final isSignedInProvider = Provider<bool>(
-  (ref) => ref.watch(staffProvider).valueOrNull != null,
+  (ref) => ref.watch(staffProvider).value != null,
 );

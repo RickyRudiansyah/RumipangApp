@@ -208,7 +208,7 @@ class _HistoryTileState extends ConsumerState<_HistoryTile> {
 
     setState(() => _busy = true);
     try {
-      final staff = ref.read(staffProvider).valueOrNull;
+      final staff = ref.read(staffProvider).value;
       await ref.read(printQueueProvider.notifier).reprintOrder(
             orderId: order.id,
             verifiedBy: staff?.name ?? 'Kasir',

@@ -20,7 +20,7 @@ final menuVariationsProvider = FutureProvider<List<MenuVariation>>(
 /// ("Ukuran" -> [Regular, Large], "Level Gula" -> [...]).
 final variationsByMenuProvider =
     Provider<Map<String, Map<String, List<MenuVariation>>>>((ref) {
-  final all = ref.watch(menuVariationsProvider).valueOrNull ?? const <MenuVariation>[];
+  final all = ref.watch(menuVariationsProvider).value ?? const <MenuVariation>[];
   final result = <String, Map<String, List<MenuVariation>>>{};
   for (final v in all) {
     result
@@ -34,7 +34,7 @@ final variationsByMenuProvider =
 /// Menu yang boleh dipesan, dikelompokkan per kategori dan diurutkan
 /// mengikuti `sort_order` kategori.
 final menuByCategoryProvider = Provider<List<MapEntry<String, List<MenuItemModel>>>>((ref) {
-  final items = ref.watch(menuProvider).valueOrNull ?? const <MenuItemModel>[];
+  final items = ref.watch(menuProvider).value ?? const <MenuItemModel>[];
 
   final buckets = <String, List<MenuItemModel>>{};
   final sortOrder = <String, int>{};

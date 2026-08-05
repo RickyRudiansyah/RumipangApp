@@ -6,6 +6,7 @@ import '../../models/catalog.dart';
 import '../../models/enums.dart';
 import '../../models/order.dart';
 import '../../shared/format.dart';
+import '../../shared/layout.dart';
 import '../../shared/theme.dart';
 import '../../shared/widgets.dart';
 import 'cart_provider.dart';
@@ -20,22 +21,98 @@ class NewOrderPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final menu = ref.watch(menuProvider);
 
+    final grid = menu.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (e, _) => ErrorView(
+        message: e is AppFailure ? e.message : 'Gagal memuat menu.\n$e',
+        onRetry: () => ref.invalidate(menuProvider),
+      ),
+      data: (_) => const _MenuGrid(),
+    );
+
+    // Keranjang selebar 400 tidak muat di HP - lebih lebar dari layarnya
+    // sendiri. Di layar sempit keranjang pindah ke lembar bawah, dipanggil
+    // dari bilah ringkasan yang selalu terlihat.
+    if (context.isCompact) {
+      return Column(
+        children: [
+          Expanded(child: grid),
+          const _CartBar(),
+        ],
+      );
+    }
+
     return Row(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Expanded(
-          child: menu.when(
-            loading: () => const Center(child: CircularProgressIndicator()),
-            error: (e, _) => ErrorView(
-              message: e is AppFailure ? e.message : 'Gagal memuat menu.\n$e',
-              onRetry: () => ref.invalidate(menuProvider),
-            ),
-            data: (_) => const _MenuGrid(),
-          ),
-        ),
+        Expanded(child: grid),
         const VerticalDivider(width: 1),
         const SizedBox(width: 400, child: _CartPane()),
       ],
+    );
+  }
+}
+
+/// Bilah keranjang di bawah layar HP.
+class _CartBar extends ConsumerWidget {
+  const _CartBar();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final cart = ref.watch(cartProvider);
+    final empty = cart.lines.isEmpty;
+
+    return Material(
+      color: Colors.white,
+      elevation: 8,
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      empty ? 'Keranjang kosong' : '${cart.itemCount} item',
+                      style: const TextStyle(fontSize: 12, color: Colors.black54),
+                    ),
+                    Text(
+                      Fmt.rupiah(cart.total),
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              FilledButton.icon(
+                onPressed: empty ? null : () => _openCart(context),
+                icon: const Icon(Icons.shopping_cart),
+                label: const Text('Keranjang'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _openCart(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) => SizedBox(
+        // Disisakan ruang di atas supaya kasir masih melihat menu di baliknya
+        // dan tahu lembar ini bisa ditutup.
+        height: MediaQuery.sizeOf(ctx).height * 0.85,
+        child: const _CartPane(),
+      ),
     );
   }
 }
@@ -191,7 +268,7 @@ class _VariationDialogState extends State<_VariationDialog> {
     return AlertDialog(
       title: Text(widget.item.name),
       content: SizedBox(
-        width: 420,
+        width: context.dialogWidth(420),
         child: SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,

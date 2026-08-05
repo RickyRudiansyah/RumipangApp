@@ -7,23 +7,30 @@ HPP, stok bahan, laporan penjualan, jatah makan karyawan, dan tema event.
 
 ---
 
-## ⚠️ Baca ini dulu — dua hal yang memblokir
+## Status: apa yang sudah jalan
 
-### 1. Backend belum menerima `Authorization: Bearer`
+### ✅ `Authorization: Bearer` sudah diterima backend
 
-API Next.js saat ini mengautentikasi staff lewat **cookie sesi**. Aplikasi ini
-memegang **JWT**. Selama `BACKEND-PREREQ.md` belum dikerjakan di repo web,
-**semua endpoint staff membalas 401** dan aplikasi tidak bisa apa-apa selain
-menampilkan layar login.
+Dulu ini blocker nomor satu — API Next.js hanya mengenal cookie sesi sementara
+aplikasi memegang JWT. **Sudah tidak lagi.** Terbukti pada 5 Agustus 2026:
+mengubah harga menu (`PUT /api/menu/[id]`) dan mengunggah foto
+(`POST /api/upload`) berhasil dari tablet, dan keduanya endpoint ber-auth staff.
 
-Aplikasi ini sudah siap; yang kurang ada di sisi server.
+Artinya sisa pekerjaan backend murni **"endpoint-nya belum dibuat"**, bukan
+soal autentikasi.
 
-Fitur dashboard admin menambah kebutuhan endpoint **baru** di atas itu —
-seluruhnya terdaftar di [docs/BACKEND-ADDITIONS.md](docs/BACKEND-ADDITIONS.md).
-Selama endpoint itu belum ada, layar Menu/Stok/Laporan/Jatah/Tema tetap terbuka
-tapi menampilkan pesan error, dan aplikasi tetap bisa dipakai untuk kasir.
+### ❌ Yang masih 404
 
-### 2. Service role key sempat tersebar
+Layar **Stok, Laporan, Jatah, dan Tema** memanggil endpoint yang belum ada dan
+menampilkan "Endpoint ini belum tersedia di server". Seluruh daftarnya, beserta
+DDL tabel dan contoh JSON, ada di
+[docs/BACKEND-ADDITIONS.md](docs/BACKEND-ADDITIONS.md).
+
+Layar **Kasir, Order, Riwayat, Printer, dan Menu** sudah bisa dipakai.
+
+---
+
+## ⚠️ Service role key sempat tersebar
 
 `SUPABASE_SERVICE_ROLE_KEY` mem-bypass seluruh RLS. Kunci itu dikirim lewat
 percakapan biasa, jadi anggap sudah bocor: **rotasi di Supabase Dashboard →
@@ -37,23 +44,35 @@ dipasang di klien (keamanannya dijaga RLS).
 
 ## Menjalankan
 
-Flutter SDK belum terpasang di mesin ini. Setelah terpasang
-([panduan resmi](https://docs.flutter.dev/get-started/install/windows)):
+Scaffolding native (`android/`) **sudah dibuat** dan ikut tersimpan di repo —
+`bootstrap.ps1` hanya perlu dijalankan sekali di mesin baru yang belum punya
+folder itu.
 
 ```powershell
-# 1. Lengkapi scaffolding native (gradle wrapper, res/, MainActivity)
-powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1
-
-# 2. Sambungkan tablet lewat USB (USB debugging aktif)
-flutter devices
-
-# 3. Jalankan
+flutter devices                    # tablet harus muncul (USB debugging aktif)
 flutter run --release
 ```
 
-`bootstrap.ps1` menjalankan `flutter create` untuk mengisi berkas native yang
-tidak bisa dibuat tanpa SDK, lalu mengembalikan `pubspec.yaml`, `lib/`, dan
-`AndroidManifest.xml` milik proyek ini, dan menyetel `minSdk 26` / `targetSdk 34`.
+### Toolchain yang terverifikasi
+
+| Komponen | Versi |
+|---|---|
+| Flutter | 3.44.8 (Dart 3.12.2) |
+| JDK | Adoptium 21 — setel dengan `flutter config --jdk-dir` |
+| Gradle · AGP · Kotlin | 9.1.0 · 9.0.1 · 2.3.20 |
+| Android SDK | `compileSdk 37` (paket `platforms;android-37.0`), `minSdk 26`, `targetSdk 34` |
+
+Tiga hal yang memakan waktu paling lama saat menyiapkan mesin baru, supaya
+tidak diulangi:
+
+- **`compileSdk` harus 37**, dan paketnya bernama `platforms;android-37.0` —
+  `platforms;android-37` polos tidak pernah dirilis Google. AGP di bawah 9
+  tidak mengenal penomoran minor ini dan akan gagal mencarinya selamanya.
+- **`kotlin.incremental=false`** di [gradle.properties](android/gradle.properties)
+  bukan hiasan. Tanpa itu KGP 2.3.20 gagal menutup cache `.tab` di Windows dan
+  build berhenti dengan `Could not close incremental caches`.
+- **JDK 21, bukan JDK bawaan Android Studio.** JBR bawaan bisa saja tidak
+  lengkap (tanpa `java.exe`), dan `java` di PATH sering masih versi 8/11.
 
 > **Emulator tidak punya Bluetooth Classic.** Modul printer mustahil diuji di
 > emulator — siapkan tablet fisik sejak awal.
@@ -92,7 +111,7 @@ lib/
 │   ├── orders/                  # board kasir + antrian aksi offline
 │   ├── new_order/               # POS manual
 │   ├── history/                 # riwayat + cetak ulang
-│   ├── admin/                   # menu & HPP: tambah menu, ubah harga, margin
+│   ├── admin/                   # menu & HPP: kategori, harga, margin, foto
 │   ├── inventory/               # stok bahan baku + alert ambang
 │   ├── reports/                 # menu terlaris & kurang laku, laba kotor
 │   ├── meals/                   # jatah makan karyawan (1x per orang per hari)
@@ -127,13 +146,13 @@ Lima layar tambahan, semuanya butuh endpoint di
 
 | Layar | Isi |
 |---|---|
-| **Menu** | Tambah menu, ubah harga, isi HPP, margin per porsi dihitung otomatis. Menu yang dijual di bawah modal ditandai merah. |
+| **Menu** | Dikelompokkan per kategori. Tambah menu & kategori, ubah harga, isi HPP, margin otomatis, foto menu (ambil → potong/putar → unggah). Menu yang dijual di bawah modal ditandai merah. |
 | **Stok** | Bahan baku + alert saat menyentuh ambang (default 20, bisa beda per bahan). Perubahan stok lewat "Sesuaikan" beserta alasannya, tidak pernah menimpa angka langsung. |
 | **Laporan** | Menu terlaris & kurang laku, omzet, total HPP, laba kotor. Rentang hari ini / 7 hari / 30 hari. |
 | **Jatah** | Jatah makan karyawan, satu kali per orang per hari. |
 | **Tema** | Tema event (Normal, Natal, Ramadan, Kemerdekaan, Imlek). Berlaku untuk aplikasi **dan** web. |
 
-Tiga keputusan yang mudah dirusak tanpa sengaja:
+Empat keputusan yang mudah dirusak tanpa sengaja:
 
 - **Snapshot biaya, bukan referensi.** `order_items.cost_price_snapshot` dan
   `staff_meals.cost_snapshot` menyimpan HPP **saat transaksi terjadi**. Tanpa
@@ -144,6 +163,21 @@ Tiga keputusan yang mudah dirusak tanpa sengaja:
 - **Warna status tidak ikut tema.** Hijau lunas dan merah belum-bayar tetap
   sama di tema apa pun; tema Natal yang membuat semuanya merah akan
   menenggelamkan penanda belum-bayar.
+- **`PUT /api/menu/[id]` mengganti seluruh baris.** Setiap field yang boleh
+  disunting **wajib** ikut dikirim, termasuk `image_url` dan `category_id` yang
+  tidak berubah. Parameternya sengaja `required` di
+  [menu_admin_repository.dart](lib/data/menu_admin_repository.dart) supaya
+  kelalaian ini gagal saat compile, bukan menghapus foto menu diam-diam di
+  server. Ini pernah terjadi.
+
+### Status endpoint
+
+Layar **Kasir, Order, Riwayat, Printer** memakai endpoint yang sudah ada dan
+berfungsi. Layar **Stok, Laporan, Jatah, Tema** memanggil endpoint yang
+**belum dibuat** — semuanya menampilkan "Endpoint ini belum tersedia di
+server" (HTTP 404) sampai [docs/BACKEND-ADDITIONS.md](docs/BACKEND-ADDITIONS.md)
+dikerjakan. Layar **Menu** berada di antaranya: sebagian besar sudah jalan,
+tapi HPP dan kategori baru butuh tambahan di web.
 
 ---
 

@@ -51,6 +51,14 @@
             </intent-filter>
         </activity>
 
+        <!-- Pemotong foto milik image_cropper (uCrop).
+             Orientasi sengaja TIDAK dikunci - tablet ini dipakai landscape,
+             dan mengunci ke portrait membuat layar berputar saat memotong. -->
+        <activity
+            android:name="com.yalantis.ucrop.UCropActivity"
+            android:exported="false"
+            android:theme="@style/Theme.AppCompat.Light.NoActionBar"/>
+
         <!-- Foreground service milik flutter_foreground_task.
              dataSync: loop klaim job cetak ke server. -->
         <service

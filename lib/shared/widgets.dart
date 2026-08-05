@@ -92,9 +92,13 @@ class PaymentChip extends StatelessWidget {
 /// Indikator printer di kanan atas - wajib selalu terlihat supaya kasir tahu
 /// tanpa membuka menu (SPEC §11).
 class PrinterIndicator extends ConsumerWidget {
-  const PrinterIndicator({super.key, this.onTap});
+  const PrinterIndicator({super.key, this.onTap, this.compact = false});
 
   final VoidCallback? onTap;
+
+  /// Di HP hanya ikon + jumlah antrian yang ditampilkan; teks statusnya
+  /// dibuang karena tidak muat, bukan karena tidak penting.
+  final bool compact;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -103,6 +107,33 @@ class PrinterIndicator extends ConsumerWidget {
 
     final ok = printer.isHealthy;
     final color = ok ? AppTheme.paid : AppTheme.unpaid;
+
+    if (compact) {
+      return InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(ok ? Icons.print : Icons.print_disabled, size: 22, color: color),
+              if (queue.pending > 0 || queue.failed > 0) ...[
+                const SizedBox(width: 5),
+                Text(
+                  '${queue.failed > 0 ? queue.failed : queue.pending}',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    color: queue.failed > 0 ? AppTheme.unpaid : Colors.black54,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      );
+    }
 
     return InkWell(
       onTap: onTap,

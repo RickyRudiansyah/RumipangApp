@@ -5,6 +5,7 @@ import '../../core/providers.dart';
 import '../../models/catalog.dart';
 import '../../models/staff_meal.dart';
 import '../../shared/format.dart';
+import '../../shared/layout.dart';
 import '../../shared/theme.dart';
 import '../../shared/widgets.dart';
 import '../new_order/catalog_provider.dart';
@@ -90,12 +91,14 @@ class StaffMealsPage extends ConsumerWidget {
                     padding: const EdgeInsets.all(20),
                     children: [
                       GridView.count(
-                        crossAxisCount: 3,
+                        crossAxisCount: context.gridColumns(),
                         shrinkWrap: true,
                         physics: const NeverScrollableScrollPhysics(),
                         mainAxisSpacing: 14,
                         crossAxisSpacing: 14,
-                        childAspectRatio: 1.35,
+                        // Satu kolom di HP jadi terlalu tinggi kalau rasionya
+                        // tetap 1.35.
+                        childAspectRatio: context.isCompact ? 2.4 : 1.35,
                         children: [
                           for (final person in people)
                             _StaffCard(
@@ -296,7 +299,7 @@ class _TakeMealDialogState extends ConsumerState<_TakeMealDialog> {
     return AlertDialog(
       title: Text('Jatah makan ${widget.person.name}'),
       content: SizedBox(
-        width: 420,
+        width: context.dialogWidth(420),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -355,7 +358,7 @@ class _TakeMealDialogState extends ConsumerState<_TakeMealDialog> {
         title: const Text('Pilih menu'),
         children: [
           SizedBox(
-            width: 380,
+            width: context.dialogWidth(380),
             height: 420,
             child: ListView.builder(
               itemCount: menu.length,

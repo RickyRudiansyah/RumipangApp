@@ -16,6 +16,10 @@ final menuVariationsProvider = FutureProvider<List<MenuVariation>>(
   (ref) => ref.watch(catalogRepositoryProvider).variations(),
 );
 
+final menuCategoriesProvider = FutureProvider<List<MenuCategory>>(
+  (ref) => ref.watch(catalogRepositoryProvider).categories(),
+);
+
 /// Variasi dikelompokkan per menu, lalu per jenis variasi
 /// ("Ukuran" -> [Regular, Large], "Level Gula" -> [...]).
 final variationsByMenuProvider =

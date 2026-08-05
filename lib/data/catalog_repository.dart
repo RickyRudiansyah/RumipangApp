@@ -24,6 +24,12 @@ class CatalogRepository {
   Future<List<MenuItemModel>> menu() async =>
       _parse(await _api.get('/api/menu'), MenuItemModel.fromJson);
 
+  /// Dipakai saat menambah/menyunting menu. Endpoint ini sudah ada di web.
+  Future<List<MenuCategory>> categories() async {
+    final list = _parse(await _api.get('/api/menu/categories'), MenuCategory.fromJson);
+    return list..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+  }
+
   /// Server mengirim **semua** variasi sekaligus; penyaringan per
   /// `menu_item_id` dilakukan di aplikasi (API-CONTRACT §5).
   Future<List<MenuVariation>> variations() async =>

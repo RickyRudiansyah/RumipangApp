@@ -11,15 +11,20 @@ tempat. Supabase SDK di aplikasi hanya untuk login dan realtime.
 
 ---
 
-## 0. Prasyarat yang memblokir SEMUANYA
+## 0. Prasyarat auth — ✅ SUDAH SELESAI
 
-Sebelum satu pun fitur di bawah bisa dipakai, `BACKEND-PREREQ.md` harus selesai:
-API harus menerima **`Authorization: Bearer <JWT>`**, bukan hanya cookie sesi.
+`Authorization: Bearer <JWT>` **sudah diterima backend.** Terbukti 5 Agustus
+2026: `PUT /api/menu/[id]` dan `POST /api/upload` — keduanya ber-auth staff —
+berhasil dipanggil dari tablet.
 
-Aplikasi mengirim header itu di setiap request ([api_client.dart:135-143](../lib/core/api_client.dart#L135-L143)).
-Selama backend masih cookie-only, seluruh endpoint staff membalas 401 dan
-aplikasi mentok di layar login. Ini bukan pekerjaan tambahan dari dokumen ini —
-ini pekerjaan yang sudah tertunda sejak awal.
+Jadi seluruh pekerjaan di dokumen ini murni soal **membuat endpoint yang belum
+ada**, bukan lagi soal autentikasi. Setiap endpoint baru cukup memakai
+`requireAuth` yang sama seperti endpoint staff lain; tidak ada perlakuan khusus
+untuk aplikasi Flutter.
+
+> Aplikasi mengirim header itu di setiap request
+> ([api_client.dart](../lib/core/api_client.dart), fungsi `_headers`), termasuk
+> pada unggah multipart.
 
 ---
 
@@ -58,47 +63,122 @@ hilang.
 
 ## 2. Menu bisa ditambah & harga bisa diubah
 
-Aplikasi butuh CRUD menu. Endpoint `GET /api/menu` sudah ada; tambahkan
-`cost_price` ke responsnya.
+**Hampir semuanya sudah ada di web.** Endpoint berikut tidak perlu dibuat baru:
 
-### `POST /api/menu`
+| Endpoint | Status |
+|---|---|
+| `GET /api/menu` | ✅ sudah ada |
+| `POST /api/menu` | ✅ sudah ada |
+| `PUT /api/menu/[id]` | ✅ sudah ada |
+| `DELETE /api/menu/[id]` | ✅ sudah ada |
+| `PATCH /api/menu/[id]/sold-out` | ✅ sudah ada |
+
+Yang perlu dikerjakan hanya **menambahkan `cost_price`** ke:
+
+1. **Respons `GET /api/menu`** — kalau tidak ada, aplikasi membacanya sebagai 0
+   dan seluruh kolom HPP tampil "belum diisi".
+2. **Payload `POST /api/menu`** — nilai awal saat menu dibuat.
+3. **Payload `PUT /api/menu/[id]`** — supaya HPP bisa diubah.
 
 ```jsonc
-// request
+// POST /api/menu  &  PUT /api/menu/[id]
 {
   "name": "Roti Coklat",
   "price": 15000,
-  "cost_price": 6000,
+  "cost_price": 6000,        // <-- satu-satunya yang baru
   "category_id": "uuid-atau-null",
-  "description": "opsional",
+  "description": "",
   "is_available": true
 }
-// response 201: objek menu_items lengkap (bentuk sama dengan GET /api/menu)
 ```
 
-### `PATCH /api/menu/:id`
+Aplikasi Flutter memanggil **`PUT`** untuk update menu, mengikuti web — bukan
+`PATCH` seperti endpoint order. `is_sold_out` dikirim terpisah lewat
+`PATCH /api/menu/[id]/sold-out`, juga mengikuti web.
 
-Terima sebagian field saja (partial update):
+**Validasi yang diharapkan:** `price >= 0`, `cost_price >= 0`. Kalau
+`cost_price > price`, **tetap terima** — margin negatif itu keputusan bisnis
+(menu promo), bukan error teknis. Aplikasi sudah menandainya merah sendiri.
+
+Soal `DELETE`: web menghapus baris sungguhan, dan itu aman karena `order_items`
+menyimpan `menu_item_name` + `menu_item_price` sebagai snapshot. Tidak perlu
+diubah jadi soft delete. (Tabel `menu_items` tidak punya kolom `is_active` —
+yang ada `is_available` dan `is_sold_out`.)
+
+### ⚠️ `PUT` harus mempertahankan `image_url`
+
+Aplikasi sekarang mengirim **seluruh** field pada `PUT`, termasuk `image_url`
+dan `category_id` yang tidak diubah. Pastikan handler web:
+
+1. **Menyimpan `cost_price`** — kalau field ini diabaikan diam-diam, HPP akan
+   selalu kembali ke 0 setiap kali menu disunting dan owner tidak akan tahu
+   kenapa.
+2. **Menyimpan `image_url` apa adanya** — termasuk saat nilainya `null`
+   (owner menghapus foto). Jangan "melindungi" foto lama dengan mengabaikan
+   `null`, karena tombol Hapus Foto jadi tidak berfungsi.
+
+Kalau `PUT` sekarang menolak payload yang memuat field tak dikenal seperti
+`cost_price`, **itu penyebab "harga tidak ter-update"** — seluruh request
+ditolak, bukan hanya field barunya.
+
+### Foto menu: `POST /api/upload`
+
+Endpoint ini **sudah ada** di web (staff, ≤5 MB). Aplikasi memakainya untuk
+foto menu: ambil dari galeri/kamera → potong & putar di tablet → unggah →
+URL hasilnya dikirim sebagai `image_url` lewat `POST`/`PUT /api/menu`.
+
+Yang perlu dipastikan hanya **bentuk responsnya**. Aplikasi menerima salah satu
+dari ini:
 
 ```jsonc
-{ "price": 17000 }
-{ "cost_price": 6500 }
-{ "is_available": false }
-{ "is_sold_out": true }
+"https://...supabase.co/storage/v1/object/public/menu-images/foo.jpg"
+{ "url": "https://..." }
+{ "image_url": "https://..." }
+{ "publicUrl": "https://..." }
+{ "data": { "url": "https://..." } }
 ```
 
-Response 200 dengan objek menu terbaru.
+Kalau bentuknya di luar daftar itu, aplikasi menampilkan "Server tidak
+mengembalikan URL foto yang bisa dibaca" — beri tahu bentuk aslinya dan sisi
+Flutter yang menyesuaikan.
 
-**Validasi yang diharapkan server:** `price >= 0`, `cost_price >= 0`. Kalau
-`cost_price > price`, tetap terima tapi kembalikan field peringatan — margin
-negatif itu keputusan bisnis, bukan error teknis. Aplikasi menampilkannya merah.
+Field multipart-nya bernama **`file`**, tipe `image/jpeg`. Aplikasi sudah
+memampatkan ke maksimal 1200×1200 kualitas 85, jadi jauh di bawah batas 5 MB.
 
-### `DELETE /api/menu/:id`
+---
 
-Lebih disarankan **soft delete** (`is_active = false`) daripada hapus baris,
-supaya `order_items` lama tidak kehilangan referensi. Kalau memang dihapus
-keras, pastikan `order_items` sudah menyimpan `menu_item_name` sebagai snapshot
-(sudah, lihat model yang ada).
+## 2b. Tambah kategori dari aplikasi
+
+Aplikasi mengelompokkan menu per kategori dan bisa menambah kategori baru.
+`GET /api/menu/categories` sudah ada; **`POST`-nya belum.**
+
+### `POST /api/menu/categories`
+
+```jsonc
+// request
+{ "name": "Minuman", "sort_order": 4 }
+
+// response 201
+{ "id": "uuid", "name": "Minuman", "sort_order": 4 }
+```
+
+`sort_order` menentukan urutan tampil kategori di aplikasi **dan** di web.
+Aplikasi mengisinya sendiri dengan `max(sort_order) + 1`, jadi kategori baru
+selalu masuk paling belakang.
+
+Duplikat nama sudah dicegah di aplikasi, tapi **tambahkan juga unique index**
+di database — dua tablet bisa menambah nama yang sama bersamaan:
+
+```sql
+create unique index if not exists categories_name_unique
+  on categories (lower(name));
+```
+
+Balas **409** dengan `{"error": "Kategori ini sudah ada"}` saat dilanggar;
+aplikasi menampilkan pesannya apa adanya.
+
+Mengubah nama, mengatur ulang urutan, dan menghapus kategori sengaja **tidak**
+dibuat di aplikasi — itu pekerjaan sesekali yang lebih nyaman lewat web.
 
 ---
 
@@ -134,6 +214,13 @@ Urutan tidak perlu diatur server — aplikasi menyortir sendiri untuk menampilka
 Menu yang **tidak pernah terjual** dalam rentang itu sebaiknya tetap muncul
 dengan `qty_sold: 0`. Justru menu inilah yang paling ingin dilihat owner di
 daftar "kurang laku" — kalau dihilangkan, menu mati jadi tak terlihat.
+
+> **Sudah ada yang mirip di web.** Owner dashboard punya "Top menu terlaris" dan
+> "Rekap penjualan (Hari Ini / 7 Hari / Semua)". Kalau logikanya sekarang
+> dihitung di dalam halaman, pindahkan ke endpoint ini lalu halaman owner ikut
+> memakainya — supaya angka di web dan di tablet tidak pernah berbeda. Dua
+> tambahan dibanding versi web sekarang: kolom `cost`/`gross_profit`, dan menu
+> ber-`qty_sold: 0` yang justru sengaja ditampilkan.
 
 ---
 
@@ -203,7 +290,7 @@ dengan `delta` keduanya terakumulasi benar.
 ```sql
 create table staff_meals (
   id uuid primary key default gen_random_uuid(),
-  staff_id uuid not null references staff(id),
+  staff_id uuid not null references staff_users(id),
   meal_date date not null default current_date,
   menu_item_id uuid references menu_items(id),
   cost_snapshot integer not null default 0,   -- cost_price saat dicatat
@@ -236,6 +323,9 @@ diperbarui.
 
 Juga dibutuhkan **`GET /api/staff`** (daftar karyawan aktif: `id`, `name`,
 `email`, `role`) supaya aplikasi bisa menampilkan tiga nama untuk dipilih.
+Endpoint ini **belum ada** — tabelnya (`staff_users`) sudah, tapi tidak pernah
+diekspos lewat API. Cukup `select id, name, email, role from staff_users where
+is_active = true`.
 
 ---
 
@@ -292,25 +382,59 @@ aplikasi diperbarui.
 Realtime opsional: kalau `app_settings` ikut dipublikasikan lewat Supabase
 realtime, tema berubah di semua perangkat tanpa perlu muat ulang.
 
+### Hubungannya dengan dark mode yang sudah ada
+
+Web sudah punya dark mode (`ThemeContext` + `localStorage` + Tailwind v4
+`@theme`). **Keduanya sumbu yang berbeda dan tidak boleh saling menimpa:**
+
+- **Dark/light** = preferensi tiap pengunjung, disimpan di perangkat masing-masing
+- **Preset event** = keputusan toko, disimpan di server, sama untuk semua orang
+
+Jadi tema Natal harus tetap punya versi terang dan gelap. Cara paling rapi:
+preset hanya mengganti nilai warna *brand/primary* di `@theme`, sementara
+token light/dark tetap seperti sekarang. Jangan menjadikan preset event sebagai
+tema ketiga yang menggantikan keduanya.
+
 ---
 
-## 7. Alur dapur dihapus
+## 7. Alur dapur dipensiunkan — di aplikasi **dan** di web
 
-**Keputusan pemilik:** order cukup masuk, tanpa langkah proses manual. Layar
-dapur beserta tombol ETA / "mulai proses" / "sudah diantar" dihapus dari
-aplikasi.
+**Keputusan pemilik:** dapur tidak dipakai lagi. Order cukup masuk lalu
+dibayar. Ini bukan hanya perubahan di aplikasi Flutter — Kitchen Display di web
+ikut dipensiunkan.
 
-Yang perlu dilakukan server: **set `status = 'SERVED'` saat order dibuat**,
-bukan `QUEUED`.
+### Yang harus dilakukan server
 
-Alasannya, aturan pengarsipan yang sudah ada mensyaratkan order berstatus
-`SERVED` **dan** lunas sebelum boleh diarsipkan
-([order.dart:172](../lib/models/order.dart#L172)). Kalau order berhenti di
-`QUEUED` selamanya, order lunas tidak akan pernah bisa diarsipkan dan board
-kasir akan menumpuk tanpa batas.
+**Set `status = 'SERVED'` saat order dibuat**, bukan `QUEUED`. Berlaku untuk
+ketiga jalur pembuatan order:
 
-Endpoint `start-processing` dan `mark-served` boleh tetap ada — aplikasi hanya
-berhenti memanggilnya. Kalau web masih memakainya, tidak ada yang rusak.
+- `POST /api/orders` (Cash dari customer)
+- `settleIntent()` (QRIS Mayar, order dibuat setelah lunas)
+- Manual order / POS dari kasir
+
+Alasannya, aturan pengarsipan mensyaratkan order berstatus `SERVED` **dan**
+lunas sebelum boleh diarsipkan ([order.dart](../lib/models/order.dart)
+`isSettled`) — sama persis dengan tombol "Selesai" di board kasir web. Kalau
+order berhenti di `QUEUED` selamanya, order lunas tidak akan pernah bisa
+diarsipkan dan board kasir menumpuk tanpa batas.
+
+### Yang bisa dipensiunkan di web
+
+| Bagian | Tindakan |
+|---|---|
+| `/dashboard/kitchen` | Tidak dipakai lagi |
+| Role `koki` di `staff_users` | Tidak dipakai lagi; **jangan hapus constraint-nya** agar baris lama tetap valid |
+| `PATCH /api/orders/[id]/status` | Boleh tetap hidup, tidak dipanggil siapa pun |
+| `PATCH /api/orders/[id]/update-eta` | Sama |
+| `GET /api/orders` (mode dapur) | Sama — board kasir memakai `?mode=cashier` |
+| Kolom `estimated_ready_at`, `confirmed_at` | Biarkan; data historis, tidak diisi lagi |
+
+Endpoint sengaja **tidak** disuruh dihapus. Menghapusnya tidak menambah apa pun
+selain risiko, dan kalau suatu saat dapur dipakai lagi tinggal dinyalakan.
+
+> Catatan: README aplikasi Flutter sempat menyebut "role `koki` sudah dihapus di
+> backend". Itu **tidak benar** — role dan layarnya masih ada di web sampai
+> perubahan ini dikerjakan.
 
 ---
 
@@ -330,14 +454,39 @@ sebagai lapisan pertahanan kedua, bukan yang pertama.
 
 ## Urutan pengerjaan yang disarankan
 
-1. **`BACKEND-PREREQ.md` (Bearer auth)** — tanpa ini tidak ada yang bisa diuji
-2. `cost_price` + `cost_price_snapshot` — kolom, karena data historis mulai
-   terkumpul sejak hari dipasang
-3. `PATCH/POST /api/menu` — fitur paling sering dipakai
-4. `app_settings` + tema — kecil, cepat, hasilnya langsung terlihat
-5. `ingredients` + `stock_movements`
-6. `staff_meals` + `GET /api/staff`
-7. `GET /api/reports/menu-sales` — paling akhir karena butuh data dari nomor 2
+| # | Pekerjaan | Ukuran |
+|---|---|---|
+| ~~0~~ | ~~Bearer auth~~ | ✅ selesai |
+| 1 | Kolom `cost_price` + `cost_price_snapshot` | kecil |
+| 2 | `cost_price` masuk ke `GET/POST /api/menu` + `PUT /api/menu/[id]` | kecil |
+| 3 | `POST /api/menu/categories` (§2b) | kecil |
+| 4 | `status = 'SERVED'` saat order dibuat (§7) | kecil |
+| 5 | `app_settings` + `GET/PATCH /api/settings/theme` | kecil |
+| 6 | `ingredients` + `stock_movements` + 4 endpoint | sedang |
+| 7 | `staff_meals` + `GET /api/staff` | sedang |
+| 8 | `GET /api/reports/menu-sales` | sedang |
 
-Nomor 2 sengaja ditaruh di awal meski fiturnya belum dipakai: setiap hari
-kolom itu belum ada adalah satu hari data laba yang hilang permanen.
+Nomor 1 sengaja ditaruh paling awal meski fiturnya belum dipakai: **setiap hari
+kolom itu belum ada adalah satu hari data laba yang hilang permanen.** Angka
+bulan lalu tidak bisa direkonstruksi kalau snapshot-nya tidak pernah ditulis.
+
+Nomor 1–5 semuanya kecil dan bisa selesai dalam satu sesi. Setelah itu layar
+Menu berfungsi penuh dan tema sudah bisa dipakai — sisanya fitur tambahan yang
+bisa menyusul.
+
+---
+
+## Ringkasan: apa yang sudah ada vs benar-benar baru
+
+| | Sudah ada di web | Perlu dibuat |
+|---|---|---|
+| **Menu** | POST, PUT, DELETE, sold-out, GET | kolom `cost_price`; `image_url` harus tersimpan lewat PUT |
+| **Kategori** | `GET /api/menu/categories` | `POST /api/menu/categories` + unique index |
+| **Foto** | `POST /api/upload` | pastikan bentuk respons terbaca (§2) |
+| **Order** | seluruh alur | `status='SERVED'` saat dibuat |
+| **Laporan** | top menu di halaman owner | endpoint + kolom biaya |
+| **Staff** | tabel `staff_users` | `GET /api/staff` |
+| **Tema** | dark mode (per perangkat) | `app_settings` + 2 endpoint |
+| **Stok bahan** | — | tabel + 4 endpoint |
+| **Jatah makan** | — | tabel + 4 endpoint |
+| **Activity log** | sudah dipakai aplikasi | — |

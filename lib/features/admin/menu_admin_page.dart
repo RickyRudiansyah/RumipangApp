@@ -1,9 +1,14 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_cropper/image_cropper.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../core/providers.dart';
 import '../../models/catalog.dart';
 import '../../shared/format.dart';
+import '../../shared/layout.dart';
 import '../../shared/theme.dart';
 import '../../shared/widgets.dart';
 import '../new_order/catalog_provider.dart';
@@ -21,7 +26,10 @@ class MenuAdminPage extends ConsumerWidget {
 
     return Column(
       children: [
-        _Header(onAdd: () => _openEditor(context, ref, null)),
+        _Header(
+          onAdd: () => _openEditor(context, ref, null),
+          onAddCategory: () => _openCategoryEditor(context, ref),
+        ),
         const Divider(height: 1),
         Expanded(
           child: menu.when(
@@ -38,6 +46,7 @@ class MenuAdminPage extends ConsumerWidget {
                   )
                 : _MenuTable(
                     items: items,
+                    groups: ref.watch(menuByCategoryProvider),
                     onEdit: (item) => _openEditor(context, ref, item),
                   ),
           ),
@@ -58,52 +67,106 @@ class MenuAdminPage extends ConsumerWidget {
     if (saved == true) ref.invalidate(menuProvider);
   }
 
+  Future<void> _openCategoryEditor(BuildContext context, WidgetRef ref) async {
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (_) => const _CategoryEditorDialog(),
+    );
+    if (saved == true) {
+      // Menu ikut dimuat ulang: kategori baru harus langsung bisa dipilih,
+      // dan nama kategori menempel di objek menu dari server.
+      ref.invalidate(menuCategoriesProvider);
+      ref.invalidate(menuProvider);
+    }
+  }
+
   static String _readable(Object error) =>
       error.toString().replaceFirst('Exception: ', '');
 }
 
 class _Header extends StatelessWidget {
-  const _Header({required this.onAdd});
+  const _Header({required this.onAdd, required this.onAddCategory});
 
   final VoidCallback onAdd;
+  final VoidCallback onAddCategory;
 
   @override
   Widget build(BuildContext context) {
+    final compact = context.isCompact;
+
+    final title = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Menu & HPP',
+          style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          compact
+              ? 'Dikelompokkan per kategori.'
+              : 'Dikelompokkan per kategori. HPP diisi manual, margin dihitung otomatis.',
+          style: const TextStyle(color: Colors.black54, fontSize: 13),
+        ),
+      ],
+    );
+
+    final buttons = [
+      OutlinedButton.icon(
+        onPressed: onAddCategory,
+        icon: const Icon(Icons.new_label_outlined),
+        label: Text(compact ? 'Kategori' : 'Tambah Kategori'),
+      ),
+      FilledButton.icon(
+        onPressed: onAdd,
+        icon: const Icon(Icons.add),
+        label: Text(compact ? 'Menu' : 'Tambah Menu'),
+      ),
+    ];
+
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
-      child: Row(
-        children: [
-          const Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+      padding: EdgeInsets.fromLTRB(compact ? 14 : 20, 16, compact ? 14 : 20, 12),
+      child: compact
+          // Di HP tombol turun ke baris sendiri - memaksanya sebaris dengan
+          // judul membuat keduanya terpotong.
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text(
-                  'Menu & HPP',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
-                ),
-                SizedBox(height: 2),
-                Text(
-                  'HPP diisi manual per menu. Margin dihitung otomatis dari harga jual.',
-                  style: TextStyle(color: Colors.black54, fontSize: 13),
+                title,
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(child: buttons[0]),
+                    const SizedBox(width: 10),
+                    Expanded(child: buttons[1]),
+                  ],
                 ),
               ],
+            )
+          : Row(
+              children: [
+                Expanded(child: title),
+                buttons[0],
+                const SizedBox(width: 10),
+                buttons[1],
+              ],
             ),
-          ),
-          FilledButton.icon(
-            onPressed: onAdd,
-            icon: const Icon(Icons.add),
-            label: const Text('Tambah Menu'),
-          ),
-        ],
-      ),
     );
   }
 }
 
 class _MenuTable extends StatelessWidget {
-  const _MenuTable({required this.items, required this.onEdit});
+  const _MenuTable({
+    required this.items,
+    required this.groups,
+    required this.onEdit,
+  });
 
   final List<MenuItemModel> items;
+
+  /// Sudah dikelompokkan dan diurutkan mengikuti `sort_order` kategori.
+  final List<MapEntry<String, List<MenuItemModel>>> groups;
+
   final void Function(MenuItemModel) onEdit;
 
   @override
@@ -132,15 +195,75 @@ class _MenuTable extends StatelessWidget {
               ),
             ),
           ),
-        const _TableHead(),
-        const Divider(height: 1),
+        // Kepala tabel hanya berguna kalau kolomnya memang sejajar.
+        if (!context.isCompact) ...[
+          const _TableHead(),
+          const Divider(height: 1),
+        ],
         Expanded(
-          child: ListView.separated(
-            itemCount: items.length,
-            separatorBuilder: (_, __) => const Divider(height: 1),
-            itemBuilder: (_, i) => _MenuRow(item: items[i], onEdit: onEdit),
+          child: ListView.builder(
+            itemCount: groups.length,
+            itemBuilder: (_, i) => _CategorySection(
+              title: groups[i].key,
+              items: groups[i].value,
+              onEdit: onEdit,
+            ),
           ),
         ),
+      ],
+    );
+  }
+}
+
+/// Satu kategori beserta menunya. Judulnya menempel di atas saat digulir
+/// supaya owner tidak kehilangan konteks di katalog yang panjang.
+class _CategorySection extends StatelessWidget {
+  const _CategorySection({
+    required this.title,
+    required this.items,
+    required this.onEdit,
+  });
+
+  final String title;
+  final List<MenuItemModel> items;
+  final void Function(MenuItemModel) onEdit;
+
+  @override
+  Widget build(BuildContext context) {
+    final total = items.fold(0, (sum, e) => sum + e.price);
+    final avg = items.isEmpty ? 0 : total ~/ items.length;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Container(
+          color: Colors.black.withValues(alpha: 0.035),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+          child: Row(
+            children: [
+              Icon(Icons.label_outline, size: 15, color: Colors.black.withValues(alpha: 0.5)),
+              const SizedBox(width: 8),
+              Text(
+                title.toUpperCase(),
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.4,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                '${items.length} menu · rata-rata ${Fmt.rupiah(avg)}',
+                style: const TextStyle(fontSize: 11, color: Colors.black45),
+              ),
+            ],
+          ),
+        ),
+        const Divider(height: 1),
+        for (final item in items) ...[
+          _MenuRow(item: item, onEdit: onEdit),
+          const Divider(height: 1),
+        ],
       ],
     );
   }
@@ -160,6 +283,7 @@ class _TableHead extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
       child: Row(
         children: const [
+          SizedBox(width: 56),
           Expanded(flex: 4, child: Text('MENU', style: style)),
           Expanded(flex: 2, child: Text('HARGA JUAL', style: style, textAlign: TextAlign.right)),
           Expanded(flex: 2, child: Text('HPP', style: style, textAlign: TextAlign.right)),
@@ -182,12 +306,34 @@ class _MenuRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final percent = item.marginPercent;
 
+    if (context.isCompact) return _compact(context, percent);
+
     return InkWell(
       onTap: () => onEdit(item),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
         child: Row(
           children: [
+            Container(
+              width: 44,
+              height: 44,
+              clipBehavior: Clip.antiAlias,
+              decoration: AppTheme.panel(
+                background: Colors.black.withValues(alpha: 0.03),
+              ),
+              child: item.imageUrl == null
+                  ? const Icon(Icons.image_outlined, size: 18, color: Colors.black26)
+                  : Image.network(
+                      item.imageUrl!,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => const Icon(
+                        Icons.broken_image_outlined,
+                        size: 18,
+                        color: Colors.black26,
+                      ),
+                    ),
+            ),
+            const SizedBox(width: 12),
             Expanded(
               flex: 4,
               child: Column(
@@ -261,6 +407,95 @@ class _MenuRow extends StatelessWidget {
     );
   }
 
+  /// Versi HP: dua baris, bukan enam kolom. Harga dan margin tetap terlihat
+  /// karena itu yang dicari owner; sisanya turun ke baris kedua.
+  Widget _compact(BuildContext context, double? percent) {
+    return InkWell(
+      onTap: () => onEdit(item),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 48,
+              height: 48,
+              clipBehavior: Clip.antiAlias,
+              decoration: AppTheme.panel(
+                background: Colors.black.withValues(alpha: 0.03),
+              ),
+              child: item.imageUrl == null
+                  ? const Icon(Icons.image_outlined, size: 20, color: Colors.black26)
+                  : Image.network(
+                      item.imageUrl!,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => const Icon(
+                        Icons.broken_image_outlined,
+                        size: 20,
+                        color: Colors.black26,
+                      ),
+                    ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          item.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontWeight: FontWeight.w700, fontSize: 15),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        Fmt.rupiah(item.price),
+                        style: const TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 6,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      _statusChip(),
+                      if (item.hasCost)
+                        StatusChip(
+                          label: 'HPP ${Fmt.rupiah(item.costPrice)}',
+                          color: Colors.black54,
+                        )
+                      else
+                        const StatusChip(
+                          label: 'HPP belum diisi',
+                          color: AppTheme.warn,
+                        ),
+                      if (item.hasCost)
+                        StatusChip(
+                          label: percent == null
+                              ? Fmt.rupiah(item.margin)
+                              : '${Fmt.rupiah(item.margin)} · ${percent.toStringAsFixed(0)}%',
+                          color: item.isLossMaking ? AppTheme.unpaid : AppTheme.paid,
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 6),
+            const Icon(Icons.chevron_right, size: 20, color: Colors.black26),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _statusChip() {
     if (!item.isAvailable) {
       return const StatusChip(label: 'Nonaktif', color: Colors.grey);
@@ -269,6 +504,298 @@ class _MenuRow extends StatelessWidget {
       return const StatusChip(label: 'Habis', color: AppTheme.warn);
     }
     return const StatusChip(label: 'Dijual', color: AppTheme.paid);
+  }
+}
+
+// ------------------------------------------------------------ kategori ----
+
+class _CategoryEditorDialog extends ConsumerStatefulWidget {
+  const _CategoryEditorDialog();
+
+  @override
+  ConsumerState<_CategoryEditorDialog> createState() =>
+      _CategoryEditorDialogState();
+}
+
+class _CategoryEditorDialogState extends ConsumerState<_CategoryEditorDialog> {
+  final _name = TextEditingController();
+  bool _saving = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _name.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final existing = ref.watch(menuCategoriesProvider).value ?? const <MenuCategory>[];
+
+    return AlertDialog(
+      title: const Text('Tambah Kategori'),
+      content: SizedBox(
+        width: context.dialogWidth(420),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              controller: _name,
+              autofocus: true,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(
+                labelText: 'Nama kategori',
+                hintText: 'mis. Minuman, Nasi, Camilan',
+              ),
+              onSubmitted: (_) => _save(existing),
+            ),
+            if (existing.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              const Text(
+                'Kategori yang sudah ada',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  for (final c in existing)
+                    StatusChip(label: c.name, color: Colors.black54),
+                ],
+              ),
+            ],
+            if (_error != null) ...[
+              const SizedBox(height: 14),
+              Text(_error!, style: const TextStyle(color: AppTheme.unpaid, fontSize: 13)),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _saving ? null : () => Navigator.pop(context),
+          child: const Text('Batal'),
+        ),
+        FilledButton(
+          onPressed: _saving ? null : () => _save(existing),
+          child: _saving
+              ? const SizedBox(
+                  width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+              : const Text('Tambah'),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _save(List<MenuCategory> existing) async {
+    final name = _name.text.trim();
+    if (name.isEmpty) {
+      setState(() => _error = 'Nama kategori wajib diisi');
+      return;
+    }
+    if (existing.any((c) => c.name.toLowerCase() == name.toLowerCase())) {
+      setState(() => _error = 'Kategori "$name" sudah ada');
+      return;
+    }
+
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+
+    // Kategori baru ditaruh di urutan paling belakang. Owner bisa mengatur
+    // ulang urutannya dari web; aplikasi sengaja tidak menyediakan itu karena
+    // drag-and-drop di tablet sambil melayani pembeli lebih menyusahkan
+    // daripada membantu.
+    final nextSort = existing.isEmpty
+        ? 1
+        : existing.map((c) => c.sortOrder).reduce((a, b) => a > b ? a : b) + 1;
+
+    try {
+      await ref.read(menuAdminRepositoryProvider).createCategory(
+            name: name,
+            sortOrder: nextSort,
+          );
+      if (mounted) Navigator.pop(context, true);
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _saving = false;
+          _error = error.toString().replaceFirst('Exception: ', '');
+        });
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------- foto ----
+
+/// Pratinjau + tombol ambil/hapus foto menu.
+class _PhotoField extends StatelessWidget {
+  const _PhotoField({
+    required this.imageUrl,
+    required this.busy,
+    required this.onPick,
+    required this.onClear,
+  });
+
+  final String? imageUrl;
+  final bool busy;
+  final void Function(ImageSource) onPick;
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 132,
+          height: 132,
+          clipBehavior: Clip.antiAlias,
+          decoration: AppTheme.panel(background: Colors.black.withValues(alpha: 0.03)),
+          child: busy
+              ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
+              : (imageUrl == null
+                  ? const Center(
+                      child: Icon(Icons.image_outlined, size: 34, color: Colors.black26),
+                    )
+                  : Image.network(
+                      imageUrl!,
+                      fit: BoxFit.cover,
+                      // Foto lama bisa saja sudah terhapus dari Storage;
+                      // jangan sampai seluruh dialog ikut gagal render.
+                      errorBuilder: (_, __, ___) => const Center(
+                        child: Icon(Icons.broken_image_outlined,
+                            size: 30, color: Colors.black26),
+                      ),
+                      loadingBuilder: (context, child, progress) => progress == null
+                          ? child
+                          : const Center(
+                              child: CircularProgressIndicator(strokeWidth: 2)),
+                    )),
+        ),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Foto menu',
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 2),
+              const Text(
+                'Bisa dipotong dan diputar sebelum diunggah.',
+                style: TextStyle(fontSize: 11, color: Colors.black54),
+              ),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: busy ? null : () => onPick(ImageSource.gallery),
+                    icon: const Icon(Icons.photo_library, size: 18),
+                    label: Text(imageUrl == null ? 'Pilih Foto' : 'Ganti Foto'),
+                    style: OutlinedButton.styleFrom(minimumSize: const Size(0, 40)),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: busy ? null : () => onPick(ImageSource.camera),
+                    icon: const Icon(Icons.photo_camera, size: 18),
+                    label: const Text('Kamera'),
+                    style: OutlinedButton.styleFrom(minimumSize: const Size(0, 40)),
+                  ),
+                  if (imageUrl != null)
+                    TextButton.icon(
+                      onPressed: busy ? null : onClear,
+                      icon: const Icon(Icons.delete_outline, size: 18),
+                      label: const Text('Hapus'),
+                      style: TextButton.styleFrom(foregroundColor: AppTheme.unpaid),
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Pemilih kategori. Dialog daftar, bukan dropdown - alasan yang sama dengan
+/// pemilih meja di POS.
+class _CategoryField extends ConsumerWidget {
+  const _CategoryField({required this.value, required this.onChanged});
+
+  final String? value;
+  final ValueChanged<String?> onChanged;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final async = ref.watch(menuCategoriesProvider);
+    final categories = async.value ?? const <MenuCategory>[];
+    final matches = categories.where((c) => c.id == value);
+    final selected = matches.isEmpty ? null : matches.first;
+
+    return InputDecorator(
+      decoration: InputDecoration(
+        labelText: 'Kategori',
+        // Kategori gagal dimuat bukan alasan membatalkan penyuntingan harga.
+        errorText: async.hasError ? 'Daftar kategori gagal dimuat' : null,
+      ),
+      child: InkWell(
+        onTap: categories.isEmpty ? null : () => _pick(context, categories),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                selected?.name ?? (value == null ? 'Tanpa kategori' : 'Kategori lain'),
+                style: TextStyle(
+                  color: selected == null ? Colors.black54 : Colors.black87,
+                ),
+              ),
+            ),
+            const Icon(Icons.arrow_drop_down, color: Colors.black45),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pick(BuildContext context, List<MenuCategory> categories) async {
+    final picked = await showDialog<String?>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: const Text('Pilih kategori'),
+        children: [
+          SizedBox(
+            width: context.dialogWidth(360),
+            height: 360,
+            child: ListView(
+              children: [
+                ListTile(
+                  title: const Text('Tanpa kategori'),
+                  onTap: () => Navigator.pop(ctx, null),
+                ),
+                const Divider(height: 1),
+                for (final c in categories)
+                  ListTile(
+                    title: Text(c.name),
+                    selected: c.id == value,
+                    onTap: () => Navigator.pop(ctx, c.id),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+    // `null` sah sebagai pilihan ("tanpa kategori"), jadi dibedakan dari
+    // dialog yang ditutup tanpa memilih lewat `context.mounted`.
+    if (context.mounted) onChanged(picked);
   }
 }
 
@@ -291,8 +818,14 @@ class _MenuEditorDialogState extends ConsumerState<_MenuEditorDialog> {
 
   late bool _available;
   late bool _soldOut;
+  late String? _categoryId;
+
+  /// URL foto yang akan disimpan. Diisi dari menu yang disunting, lalu diganti
+  /// kalau owner mengunggah foto baru.
+  late String? _imageUrl;
 
   bool _saving = false;
+  bool _uploading = false;
   String? _error;
 
   bool get _isNew => widget.existing == null;
@@ -309,6 +842,8 @@ class _MenuEditorDialogState extends ConsumerState<_MenuEditorDialog> {
     _description = TextEditingController(text: e?.description ?? '');
     _available = e?.isAvailable ?? true;
     _soldOut = e?.isSoldOut ?? false;
+    _categoryId = e?.categoryId;
+    _imageUrl = e?.imageUrl;
   }
 
   @override
@@ -331,17 +866,29 @@ class _MenuEditorDialogState extends ConsumerState<_MenuEditorDialog> {
     return AlertDialog(
       title: Text(_isNew ? 'Tambah Menu' : 'Ubah Menu'),
       content: SizedBox(
-        width: 480,
+        width: context.dialogWidth(480),
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              _PhotoField(
+                imageUrl: _imageUrl,
+                busy: _uploading,
+                onPick: _pickPhoto,
+                onClear: () => setState(() => _imageUrl = null),
+              ),
+              const SizedBox(height: 16),
               TextField(
                 controller: _name,
                 autofocus: _isNew,
                 textCapitalization: TextCapitalization.words,
                 decoration: const InputDecoration(labelText: 'Nama menu'),
+              ),
+              const SizedBox(height: 14),
+              _CategoryField(
+                value: _categoryId,
+                onChanged: (v) => setState(() => _categoryId = v),
               ),
               const SizedBox(height: 14),
               Row(
@@ -447,7 +994,9 @@ class _MenuEditorDialogState extends ConsumerState<_MenuEditorDialog> {
           child: const Text('Batal'),
         ),
         FilledButton(
-          onPressed: _saving ? null : _save,
+          // Jangan biarkan disimpan sementara foto masih diunggah - URL-nya
+          // belum ada, dan hasilnya menu tersimpan tanpa foto.
+          onPressed: (_saving || _uploading) ? null : _save,
           child: _saving
               ? const SizedBox(
                   width: 18,
@@ -458,6 +1007,81 @@ class _MenuEditorDialogState extends ConsumerState<_MenuEditorDialog> {
         ),
       ],
     );
+  }
+
+  /// Ambil foto → potong/putar → unggah.
+  ///
+  /// Pemotongan terjadi **sebelum** unggah supaya yang dikirim ke server sudah
+  /// berukuran wajar; endpoint web membatasi 5 MB, dan foto mentah dari kamera
+  /// tablet gampang melewatinya.
+  Future<void> _pickPhoto(ImageSource source) async {
+    setState(() {
+      _error = null;
+      _uploading = true;
+    });
+
+    try {
+      final picked = await ImagePicker().pickImage(
+        source: source,
+        // Batas awal supaya uCrop tidak memuat bitmap raksasa ke memori
+        // tablet Unisoc T618.
+        maxWidth: 2000,
+        maxHeight: 2000,
+        imageQuality: 92,
+      );
+      if (picked == null) {
+        if (mounted) setState(() => _uploading = false);
+        return;
+      }
+
+      final cropped = await ImageCropper().cropImage(
+        sourcePath: picked.path,
+        compressFormat: ImageCompressFormat.jpg,
+        compressQuality: 85,
+        maxWidth: 1200,
+        maxHeight: 1200,
+        uiSettings: [
+          AndroidUiSettings(
+            toolbarTitle: 'Sesuaikan Foto',
+            toolbarColor: AppTheme.brand,
+            toolbarWidgetColor: Colors.white,
+            initAspectRatio: CropAspectRatioPreset.square,
+            lockAspectRatio: false,
+            aspectRatioPresets: [
+              CropAspectRatioPreset.square,
+              CropAspectRatioPreset.ratio4x3,
+              CropAspectRatioPreset.ratio16x9,
+              CropAspectRatioPreset.original,
+            ],
+          ),
+        ],
+      );
+      if (cropped == null) {
+        if (mounted) setState(() => _uploading = false);
+        return;
+      }
+
+      final bytes = await File(cropped.path).readAsBytes();
+      final url = await ref.read(menuAdminRepositoryProvider).uploadImage(
+            bytes: bytes,
+            filename: 'menu-${DateTime.now().millisecondsSinceEpoch}.jpg',
+          );
+
+      if (mounted) {
+        setState(() {
+          _imageUrl = url;
+          _uploading = false;
+        });
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _uploading = false;
+          _error = 'Gagal mengunggah foto: '
+              '${error.toString().replaceFirst('Exception: ', '')}';
+        });
+      }
+    }
   }
 
   Future<void> _save() async {
@@ -483,18 +1107,28 @@ class _MenuEditorDialogState extends ConsumerState<_MenuEditorDialog> {
           name: name,
           price: _priceValue,
           costPrice: _costValue,
+          categoryId: _categoryId,
           description: _description.text.trim(),
+          imageUrl: _imageUrl,
         );
       } else {
+        // Semua field dikirim, termasuk yang tidak diubah - PUT mengganti
+        // seluruh baris, jadi field yang dihilangkan akan jadi null di server.
         await repo.update(
           widget.existing!.id,
           name: name,
           price: _priceValue,
           costPrice: _costValue,
           isAvailable: _available,
-          isSoldOut: _soldOut,
+          categoryId: _categoryId,
           description: _description.text.trim(),
+          imageUrl: _imageUrl,
         );
+        // Endpoint terpisah di web - hanya dipanggil kalau memang berubah,
+        // supaya tidak menulis ulang tanpa alasan.
+        if (_soldOut != widget.existing!.isSoldOut) {
+          await repo.toggleSoldOut(widget.existing!.id, _soldOut);
+        }
       }
       if (mounted) Navigator.pop(context, true);
     } catch (error) {

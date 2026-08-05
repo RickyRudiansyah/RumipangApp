@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../models/report.dart';
 import '../../shared/format.dart';
+import '../../shared/layout.dart';
 import '../../shared/theme.dart';
 import '../../shared/widgets.dart';
 import 'report_provider.dart';
@@ -22,15 +23,26 @@ class ReportsPage extends ConsumerWidget {
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
-          child: Row(
+          padding: EdgeInsets.fromLTRB(
+            context.isCompact ? 14 : 20,
+            16,
+            context.isCompact ? 14 : 20,
+            12,
+          ),
+          child: Flex(
+            // Judul dan pemilih rentang bertumpuk di HP; dipaksa sebaris
+            // membuat SegmentedButton terpotong.
+            direction: context.isCompact ? Axis.vertical : Axis.horizontal,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Expanded(
-                child: Text(
+              Expanded(
+                flex: context.isCompact ? 0 : 1,
+                child: const Text(
                   'Laporan Penjualan',
                   style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
                 ),
               ),
+              if (context.isCompact) const SizedBox(height: 10),
               SegmentedButton<ReportRange>(
                 segments: [
                   for (final r in ReportRange.values)
@@ -76,40 +88,59 @@ class _Body extends StatelessWidget {
     final best = report.bestSellers.where((e) => e.qtySold > 0).take(8).toList();
     final worst = report.worstSellers.take(8).toList();
 
+    final compact = context.isCompact;
+
+    final summaries = [
+      _Summary(
+        label: 'Omzet',
+        value: Fmt.rupiah(report.totalRevenue),
+        icon: Icons.payments,
+        color: AppTheme.queued,
+      ),
+      _Summary(
+        label: 'Total HPP',
+        value: Fmt.rupiah(report.totalCost),
+        icon: Icons.shopping_basket,
+        color: AppTheme.warn,
+      ),
+      _Summary(
+        label: 'Laba kotor',
+        value: Fmt.rupiah(report.totalProfit),
+        icon: Icons.trending_up,
+        color: report.totalProfit < 0 ? AppTheme.unpaid : AppTheme.paid,
+      ),
+      _Summary(
+        label: 'Porsi terjual',
+        value: '${report.totalQty}',
+        icon: Icons.restaurant,
+        color: Colors.black54,
+      ),
+    ];
+
     return ListView(
-      padding: const EdgeInsets.all(20),
+      padding: EdgeInsets.all(compact ? 14 : 20),
       children: [
-        Row(
-          children: [
-            _Summary(
-              label: 'Omzet',
-              value: Fmt.rupiah(report.totalRevenue),
-              icon: Icons.payments,
-              color: AppTheme.queued,
-            ),
-            const SizedBox(width: 12),
-            _Summary(
-              label: 'Total HPP',
-              value: Fmt.rupiah(report.totalCost),
-              icon: Icons.shopping_basket,
-              color: AppTheme.warn,
-            ),
-            const SizedBox(width: 12),
-            _Summary(
-              label: 'Laba kotor',
-              value: Fmt.rupiah(report.totalProfit),
-              icon: Icons.trending_up,
-              color: report.totalProfit < 0 ? AppTheme.unpaid : AppTheme.paid,
-            ),
-            const SizedBox(width: 12),
-            _Summary(
-              label: 'Porsi terjual',
-              value: '${report.totalQty}',
-              icon: Icons.restaurant,
-              color: Colors.black54,
-            ),
-          ],
-        ),
+        // Empat kartu sebaris jadi tak terbaca di HP; dipecah dua-dua.
+        if (compact)
+          Column(
+            children: [
+              Row(children: [summaries[0], const SizedBox(width: 12), summaries[1]]),
+              const SizedBox(height: 12),
+              Row(children: [summaries[2], const SizedBox(width: 12), summaries[3]]),
+            ],
+          )
+        else
+          Row(
+            children: [
+              summaries[0],
+              const SizedBox(width: 12),
+              summaries[1],
+              const SizedBox(width: 12),
+              summaries[2],
+              const SizedBox(width: 12),
+              summaries[3],
+            ],
+          ),
         if (report.totalCost == 0) ...[
           const SizedBox(height: 12),
           Container(
@@ -134,32 +165,51 @@ class _Body extends StatelessWidget {
           ),
         ],
         const SizedBox(height: 22),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: _RankCard(
-                title: 'Paling laku',
-                subtitle: 'Urut dari porsi terbanyak',
-                icon: Icons.local_fire_department,
-                color: AppTheme.paid,
-                items: best,
-                emptyText: 'Belum ada yang terjual.',
+        if (compact) ...[
+          _RankCard(
+            title: 'Paling laku',
+            subtitle: 'Urut dari porsi terbanyak',
+            icon: Icons.local_fire_department,
+            color: AppTheme.paid,
+            items: best,
+            emptyText: 'Belum ada yang terjual.',
+          ),
+          const SizedBox(height: 16),
+          _RankCard(
+            title: 'Kurang laku',
+            subtitle: 'Termasuk yang belum pernah terjual',
+            icon: Icons.trending_down,
+            color: AppTheme.unpaid,
+            items: worst,
+            emptyText: 'Semua menu laku.',
+          ),
+        ] else
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: _RankCard(
+                  title: 'Paling laku',
+                  subtitle: 'Urut dari porsi terbanyak',
+                  icon: Icons.local_fire_department,
+                  color: AppTheme.paid,
+                  items: best,
+                  emptyText: 'Belum ada yang terjual.',
+                ),
               ),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: _RankCard(
-                title: 'Kurang laku',
-                subtitle: 'Termasuk yang belum pernah terjual',
-                icon: Icons.trending_down,
-                color: AppTheme.unpaid,
-                items: worst,
-                emptyText: 'Semua menu laku.',
+              const SizedBox(width: 16),
+              Expanded(
+                child: _RankCard(
+                  title: 'Kurang laku',
+                  subtitle: 'Termasuk yang belum pernah terjual',
+                  icon: Icons.trending_down,
+                  color: AppTheme.unpaid,
+                  items: worst,
+                  emptyText: 'Semua menu laku.',
+                ),
               ),
-            ),
-          ],
-        ),
+            ],
+          ),
       ],
     );
   }

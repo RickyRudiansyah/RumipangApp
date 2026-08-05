@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../shared/app_theme_preset.dart';
+import '../../shared/layout.dart';
 import '../../shared/theme.dart';
 import '../../shared/widgets.dart';
 import 'theme_provider.dart';
@@ -33,10 +34,10 @@ class ThemeSettingsPage extends ConsumerWidget {
           const SizedBox(height: 20),
           Expanded(
             child: GridView.count(
-              crossAxisCount: 3,
+              crossAxisCount: context.gridColumns(compact: 1, medium: 2, expanded: 3),
               mainAxisSpacing: 14,
               crossAxisSpacing: 14,
-              childAspectRatio: 1.6,
+              childAspectRatio: context.isCompact ? 2.8 : 1.6,
               children: [
                 for (final preset in ThemePreset.values)
                   _PresetCard(

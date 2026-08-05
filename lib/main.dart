@@ -14,9 +14,14 @@ import 'features/printer/print_foreground_service.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Tablet kasir dipasang mendatar di meja - layout master-detail dirancang
-  // untuk landscape, bukan potret yang di-stretch (SPEC §2).
+  // Semua orientasi diizinkan.
+  //
+  // Dulu dikunci landscape karena tablet kasir dipasang mendatar di meja
+  // (SPEC §2). Sekarang aplikasi juga dipakai di HP, dan mengunci landscape
+  // di layar 6" membuat semuanya sempit tanpa alasan. Tata letak menyesuaikan
+  // lebar layar lewat [ScreenSize], bukan lewat kunci orientasi.
   await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
     DeviceOrientation.landscapeLeft,
     DeviceOrientation.landscapeRight,
   ]);

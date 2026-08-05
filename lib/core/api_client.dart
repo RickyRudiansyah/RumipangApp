@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart' show MediaType;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'env.dart';
@@ -46,6 +47,11 @@ class ApiClient {
 
   Future<dynamic> patch(String path, {Object? body}) =>
       _send('PATCH', path, body: body);
+
+  /// Dipakai untuk endpoint web yang sudah ada dan memang PUT
+  /// (`PUT /api/menu/[id]`). Endpoint order semuanya PATCH.
+  Future<dynamic> put(String path, {Object? body}) =>
+      _send('PUT', path, body: body);
 
   Future<dynamic> delete(String path) => _send('DELETE', path);
 
@@ -184,8 +190,84 @@ class ApiClient {
   String _fallbackMessage(int status) => switch (status) {
         400 => 'Permintaan ditolak server',
         403 => 'Tidak punya akses',
-        404 => 'Data tidak ditemukan',
+        // 404 tanpa body JSON hampir selalu berarti route-nya memang belum ada
+        // di Next.js - bukan "barisnya tidak ketemu". Membedakan keduanya
+        // menghemat waktu menebak saat backend belum lengkap.
+        404 => 'Endpoint ini belum tersedia di server',
         429 => 'Terlalu banyak permintaan, coba sebentar lagi',
         _ => 'Kesalahan server ($status)',
       };
+
+  // ------------------------------------------------------------- unggah ----
+
+  /// Unggah berkas ke `POST /api/upload` (multipart), lalu kembalikan URL
+  /// publiknya.
+  ///
+  /// Bentuk respons endpoint web belum terdokumentasi, jadi beberapa nama
+  /// field yang lazim dicoba berurutan sebelum menyerah.
+  Future<String> uploadFile({
+    required String path,
+    required List<int> bytes,
+    required String filename,
+    String field = 'file',
+    String? contentType,
+  }) async {
+    final uri = _buildUri(path, null);
+
+    Future<http.Response> send() async {
+      final request = http.MultipartRequest('POST', uri)
+        ..headers.addAll(await _headers(withBody: false))
+        ..files.add(
+          http.MultipartFile.fromBytes(
+            field,
+            bytes,
+            filename: filename,
+            contentType:
+                contentType == null ? null : MediaType.parse(contentType),
+          ),
+        );
+      final streamed = await _http.send(request).timeout(_uploadTimeout);
+      return http.Response.fromStream(streamed);
+    }
+
+    http.Response response;
+    try {
+      response = await send();
+      if (response.statusCode == 401) {
+        if (!await _refreshSessionOnce()) throw const SessionExpiredFailure();
+        response = await send();
+      }
+    } on TimeoutException {
+      throw const NetworkFailure('Unggah foto terlalu lama, coba lagi');
+    } on SocketException {
+      throw const NetworkFailure('Tidak ada koneksi internet');
+    } on http.ClientException catch (e) {
+      throw NetworkFailure('Gangguan jaringan: ${e.message}');
+    }
+
+    final decoded = _decode(response);
+    final url = _pickUrl(decoded);
+    if (url == null) {
+      throw const ApiFailure(
+        'Server tidak mengembalikan URL foto yang bisa dibaca',
+        200,
+      );
+    }
+    return url;
+  }
+
+  /// Unggah foto bisa jauh lebih lama dari request JSON biasa.
+  static const _uploadTimeout = Duration(seconds: 60);
+
+  static String? _pickUrl(dynamic decoded) {
+    if (decoded is String && decoded.startsWith('http')) return decoded;
+    if (decoded is! Map) return null;
+    for (final key in const ['url', 'image_url', 'publicUrl', 'public_url', 'path']) {
+      final value = decoded[key];
+      if (value is String && value.isNotEmpty) return value;
+    }
+    // Beberapa handler membungkus dalam { data: { ... } }.
+    if (decoded['data'] is Map) return _pickUrl(decoded['data']);
+    return null;
+  }
 }

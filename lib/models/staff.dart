@@ -1,7 +1,12 @@
 import 'json.dart';
 
-/// Baris `staff_users`. Hanya role `cashier` dan `owner` yang berlaku
-/// (role `koki` sudah dihapus di backend - API-CONTRACT §1).
+/// Baris `staff_users`. Hanya role `cashier` dan `owner` yang boleh memakai
+/// aplikasi ini.
+///
+/// Role `koki` **masih ada** di constraint tabel dan di web, tapi dapur sudah
+/// dipensiunkan (BACKEND-ADDITIONS.md §7). Constraint-nya sengaja tidak dihapus
+/// supaya baris staff lama tetap valid; akun koki hanya tidak bisa masuk ke
+/// aplikasi kasir - dan memang tidak perlu.
 class StaffIdentity {
   const StaffIdentity({
     required this.id,

@@ -45,6 +45,13 @@ dependencies:
   # di-upgrade.
   intl: any
 
+  # Foto menu: ambil dari galeri/kamera lalu potong & putar sebelum diunggah.
+  image_picker: ^1.2.3
+  image_cropper: ^12.2.1
+
+  # MediaType untuk unggah multipart ke POST /api/upload.
+  http_parser: ^4.1.2
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

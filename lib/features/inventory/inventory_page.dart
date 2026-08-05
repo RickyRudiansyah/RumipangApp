@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/providers.dart';
 import '../../models/inventory.dart';
+import '../../shared/layout.dart';
 import '../../shared/theme.dart';
 import '../../shared/widgets.dart';
 import 'inventory_provider.dart';
@@ -23,29 +24,37 @@ class InventoryPage extends ConsumerWidget {
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+          padding: EdgeInsets.fromLTRB(
+            context.isCompact ? 14 : 20,
+            16,
+            context.isCompact ? 14 : 20,
+            12,
+          ),
           child: Row(
             children: [
-              const Expanded(
+              Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
+                    const Text(
                       'Stok Bahan Baku',
                       style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
                     ),
-                    SizedBox(height: 2),
+                    const SizedBox(height: 2),
                     Text(
-                      'Dicatat manual - stok tidak berkurang sendiri saat ada penjualan.',
-                      style: TextStyle(color: Colors.black54, fontSize: 13),
+                      context.isCompact
+                          ? 'Dicatat manual.'
+                          : 'Dicatat manual - stok tidak berkurang sendiri saat ada penjualan.',
+                      style: const TextStyle(color: Colors.black54, fontSize: 13),
                     ),
                   ],
                 ),
               ),
+              const SizedBox(width: 10),
               FilledButton.icon(
                 onPressed: () => _openCreate(context, ref),
                 icon: const Icon(Icons.add),
-                label: const Text('Tambah Bahan'),
+                label: Text(context.isCompact ? 'Bahan' : 'Tambah Bahan'),
               ),
             ],
           ),
@@ -142,6 +151,61 @@ class _Row extends ConsumerWidget {
       _ when item.isLow => (AppTheme.warn, 'Menipis'),
       _ => (AppTheme.paid, 'Aman'),
     };
+
+    if (context.isCompact) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    item.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  item.stockLabel,
+                  style: TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
+                    color: item.isLow ? color : Colors.black87,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                StatusChip(label: label, color: color),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'alert ${item.thresholdLabel}',
+                    style: const TextStyle(fontSize: 11, color: Colors.black45),
+                  ),
+                ),
+                OutlinedButton(
+                  onPressed: () => _adjust(context, ref),
+                  style: OutlinedButton.styleFrom(minimumSize: const Size(0, 38)),
+                  child: const Text('Sesuaikan'),
+                ),
+                IconButton(
+                  tooltip: 'Ubah ambang alert',
+                  onPressed: () => _editThreshold(context, ref),
+                  icon: const Icon(Icons.tune, size: 18),
+                ),
+              ],
+            ),
+          ],
+        ),
+      );
+    }
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
@@ -249,7 +313,7 @@ class _AdjustDialogState extends ConsumerState<_AdjustDialog> {
     return AlertDialog(
       title: Text('Sesuaikan ${widget.item.name}'),
       content: SizedBox(
-        width: 420,
+        width: context.dialogWidth(420),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -408,7 +472,7 @@ class _IngredientEditorDialogState extends ConsumerState<_IngredientEditorDialog
     return AlertDialog(
       title: Text(_isNew ? 'Tambah Bahan Baku' : 'Ubah ${widget.existing!.name}'),
       content: SizedBox(
-        width: 420,
+        width: context.dialogWidth(420),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,

@@ -57,6 +57,37 @@ class CashierBoardPage extends ConsumerWidget {
         }
         selected ??= groups.isEmpty ? null : groups.first;
 
+        const emptyState = EmptyState(
+          icon: Icons.table_restaurant,
+          title: 'Belum ada order aktif',
+          subtitle: 'Order yang masuk akan muncul di sini secara otomatis.',
+        );
+
+        // Di HP master-detail tidak muat berdampingan: panel meja 264px
+        // menyisakan ruang yang tidak cukup untuk detail order. Jadi daftar
+        // meja dan detailnya ditumpuk - detail dibuka sebagai halaman baru.
+        if (context.isCompact) {
+          return Column(
+            children: [
+              if (data.fromCache)
+                OfflineBanner(updatedAt: data.updatedAt, pendingActions: pending.length),
+              Expanded(
+                child: groups.isEmpty
+                    ? emptyState
+                    : _TableList(
+                        groups: groups,
+                        selected: null,
+                        onOpen: (group) => Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => _TableDetailPage(tableKey: group.key),
+                          ),
+                        ),
+                      ),
+              ),
+            ],
+          );
+        }
+
         return Column(
           children: [
             if (data.fromCache)
@@ -71,14 +102,7 @@ class CashierBoardPage extends ConsumerWidget {
                   ),
                   const VerticalDivider(width: 1),
                   Expanded(
-                    child: selected == null
-                        ? const EmptyState(
-                            icon: Icons.table_restaurant,
-                            title: 'Belum ada order aktif',
-                            subtitle: 'Order yang masuk akan muncul di sini secara '
-                                'otomatis.',
-                          )
-                        : _TableDetail(group: selected),
+                    child: selected == null ? emptyState : _TableDetail(group: selected),
                   ),
                 ],
               ),

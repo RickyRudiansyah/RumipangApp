@@ -7,6 +7,7 @@ import '../../core/failure.dart';
 import '../../models/enums.dart';
 import '../../models/print_job.dart';
 import '../../shared/format.dart';
+import '../../shared/layout.dart';
 import '../../shared/theme.dart';
 import '../../shared/widgets.dart';
 import 'print_queue.dart';
@@ -370,7 +371,7 @@ class _PrinterSettingsPageState extends ConsumerState<PrinterSettingsPage> {
       builder: (ctx) => AlertDialog(
         title: Text('Pratinjau struk #${job.orderNo}'),
         content: SizedBox(
-          width: 380,
+          width: context.dialogWidth(380),
           child: SingleChildScrollView(
             child: Container(
               padding: const EdgeInsets.all(14),

@@ -18,6 +18,40 @@ class StaffMealRepository {
   Future<List<StaffMember>> staff() async =>
       _parse(await _api.get('/api/staff'), StaffMember.fromJson);
 
+  /// Tambah karyawan. **Khusus owner** (BACKEND-ADDITIONS.md §5b).
+  ///
+  /// Karyawan yang ditambahkan dari sini belum tentu bisa login — pembuatan
+  /// akun Supabase Auth adalah keputusan sisi server. Untuk jatah makan,
+  /// baris `staff_users` saja sudah cukup.
+  Future<StaffMember> createStaff({
+    required String name,
+    required String role,
+    String? email,
+  }) async {
+    final json = await _api.post('/api/staff', body: {
+      'name': name,
+      'role': role,
+      if (email != null && email.isNotEmpty) 'email': email,
+    });
+    return StaffMember.fromJson(Map<String, dynamic>.from(json as Map));
+  }
+
+  Future<StaffMember> updateStaff(
+    String id, {
+    required String name,
+    String? role,
+    String? email,
+    bool? isActive,
+  }) async {
+    final json = await _api.patch('/api/staff/$id', body: {
+      'name': name,
+      if (role != null) 'role': role,
+      if (email != null) 'email': email,
+      if (isActive != null) 'is_active': isActive,
+    });
+    return StaffMember.fromJson(Map<String, dynamic>.from(json as Map));
+  }
+
   /// Jatah makan pada satu tanggal. Tanpa argumen = hari ini.
   Future<List<StaffMeal>> onDate(DateTime date) async => _parse(
         await _api.get('/api/staff-meals', query: {'date': _ymd(date)}),

@@ -49,3 +49,34 @@ extension ScreenSizeContext on BuildContext {
         ScreenSize.expanded => expanded,
       };
 }
+
+/// Lebar minimum sebelum tata letak master-detail layak dipakai.
+///
+/// **Jangan pakai [ScreenSize] untuk keputusan ini.** Tablet 10,4" dalam
+/// potret masuk kategori `medium`, tapi setelah dipotong panel kiri 264px
+/// sisanya hanya ±335px - tidak cukup untuk detail order, dan tombolnya
+/// menghimpit teks sampai pecah satu huruf per baris.
+///
+/// Ukurlah lebar yang **benar-benar tersedia** lewat `LayoutBuilder`, bukan
+/// lebar layar.
+class SplitLayout {
+  const SplitLayout._();
+
+  /// Panel meja 264 + detail order yang masih terbaca.
+  static const cashierBoard = 720.0;
+
+  /// Grid menu + keranjang 400.
+  static const posCart = 760.0;
+
+  /// Teks penjelas + tombol aksi panjang dalam satu baris.
+  static const textWithAction = 520.0;
+
+  /// Baris riwayat: nomor + meja + tanggal + 2 chip + harga + 2 tombol.
+  static const historyRow = 860.0;
+
+  /// Judul + kolom cari + tombol muat ulang dalam satu baris.
+  static const searchBar = 640.0;
+
+  /// Panel printer 400 + daftar antrian cetak.
+  static const printerPane = 760.0;
+}

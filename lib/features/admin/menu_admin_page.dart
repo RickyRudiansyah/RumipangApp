@@ -507,6 +507,349 @@ class _MenuRow extends StatelessWidget {
   }
 }
 
+// ---------------------------------------------------- topping & variasi ----
+
+/// Daftar topping/variasi satu menu, dikelompokkan per jenis.
+///
+/// Hanya muncul untuk menu yang sudah tersimpan — variasi butuh
+/// `menu_item_id`, dan menu baru belum punya ID sampai disimpan.
+class _VariationsSection extends ConsumerWidget {
+  const _VariationsSection({required this.menuItemId});
+
+  final String menuItemId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final async = ref.watch(menuVariationsProvider);
+    final all = async.value ?? const <MenuVariation>[];
+    final mine = all.where((v) => v.menuItemId == menuItemId).toList();
+
+    // Dikelompokkan per jenis, urutannya mengikuti kemunculan pertama.
+    final groups = <String, List<MenuVariation>>{};
+    for (final v in mine) {
+      groups.putIfAbsent(v.variationType, () => []).add(v);
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            const Expanded(
+              child: Text(
+                'Topping & Variasi',
+                style: TextStyle(fontWeight: FontWeight.w800),
+              ),
+            ),
+            TextButton.icon(
+              onPressed: () => _openEditor(context, ref, null, groups.keys.toList()),
+              icon: const Icon(Icons.add, size: 18),
+              label: const Text('Tambah'),
+            ),
+          ],
+        ),
+        if (async.isLoading && all.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 12),
+            child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+          )
+        else if (groups.isEmpty)
+          const Padding(
+            padding: EdgeInsets.only(bottom: 4),
+            child: Text(
+              'Belum ada. Tambahkan mis. "Extra Topping" → Keju +Rp 5.000.',
+              style: TextStyle(fontSize: 12, color: Colors.black54),
+            ),
+          )
+        else
+          for (final entry in groups.entries) ...[
+            Padding(
+              padding: const EdgeInsets.only(top: 6, bottom: 4),
+              child: Text(
+                entry.key.toUpperCase(),
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.4,
+                  color: Colors.black45,
+                ),
+              ),
+            ),
+            for (final v in entry.value)
+              _VariationRow(
+                variation: v,
+                onEdit: () => _openEditor(context, ref, v, groups.keys.toList()),
+                onDelete: () => _delete(context, ref, v),
+              ),
+          ],
+      ],
+    );
+  }
+
+  Future<void> _openEditor(
+    BuildContext context,
+    WidgetRef ref,
+    MenuVariation? existing,
+    List<String> knownTypes,
+  ) async {
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (_) => _VariationEditorDialog(
+        menuItemId: menuItemId,
+        existing: existing,
+        knownTypes: knownTypes,
+      ),
+    );
+    if (saved == true) ref.invalidate(menuVariationsProvider);
+  }
+
+  Future<void> _delete(BuildContext context, WidgetRef ref, MenuVariation v) async {
+    final ok = await confirmDialog(
+      context,
+      title: 'Hapus "${v.label}"?',
+      message: 'Opsi ini tidak akan muncul lagi saat membuat order.',
+      confirmLabel: 'Hapus',
+      destructive: true,
+    );
+    if (!ok) return;
+
+    try {
+      await ref.read(menuAdminRepositoryProvider).deleteVariation(v.id);
+      ref.invalidate(menuVariationsProvider);
+    } catch (error) {
+      if (context.mounted) {
+        showSnack(
+          context,
+          error.toString().replaceFirst('Exception: ', ''),
+          error: true,
+        );
+      }
+    }
+  }
+}
+
+class _VariationRow extends StatelessWidget {
+  const _VariationRow({
+    required this.variation,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  final MenuVariation variation;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onEdit,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Row(
+          children: [
+            const Icon(Icons.circle, size: 7, color: Colors.black38),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                variation.label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            Text(
+              variation.extraPrice == 0
+                  ? 'gratis'
+                  : '+${Fmt.rupiah(variation.extraPrice)}',
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                color: variation.extraPrice == 0 ? Colors.black45 : AppTheme.warn,
+              ),
+            ),
+            IconButton(
+              tooltip: 'Hapus',
+              onPressed: onDelete,
+              icon: const Icon(Icons.close, size: 16),
+              visualDensity: VisualDensity.compact,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _VariationEditorDialog extends ConsumerStatefulWidget {
+  const _VariationEditorDialog({
+    required this.menuItemId,
+    required this.existing,
+    required this.knownTypes,
+  });
+
+  final String menuItemId;
+  final MenuVariation? existing;
+
+  /// Jenis yang sudah dipakai menu ini, ditawarkan sebagai pintasan supaya
+  /// tidak lahir "Extra Topping" dan "extra topping" yang terpisah.
+  final List<String> knownTypes;
+
+  @override
+  ConsumerState<_VariationEditorDialog> createState() =>
+      _VariationEditorDialogState();
+}
+
+class _VariationEditorDialogState extends ConsumerState<_VariationEditorDialog> {
+  late final TextEditingController _type;
+  late final TextEditingController _label;
+  late final TextEditingController _price;
+
+  bool _saving = false;
+  String? _error;
+
+  bool get _isNew => widget.existing == null;
+
+  @override
+  void initState() {
+    super.initState();
+    final e = widget.existing;
+    _type = TextEditingController(text: e?.variationType ?? '');
+    _label = TextEditingController(text: e?.label ?? '');
+    _price = TextEditingController(
+      text: e == null || e.extraPrice == 0 ? '' : e.extraPrice.toString(),
+    );
+  }
+
+  @override
+  void dispose() {
+    _type.dispose();
+    _label.dispose();
+    _price.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(_isNew ? 'Tambah Opsi' : 'Ubah Opsi'),
+      content: SizedBox(
+        width: context.dialogWidth(420),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              controller: _type,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(
+                labelText: 'Jenis / grup',
+                hintText: 'mis. Extra Topping, Ukuran, Level Pedas',
+              ),
+            ),
+            if (widget.knownTypes.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  for (final t in widget.knownTypes)
+                    ActionChip(
+                      label: Text(t, style: const TextStyle(fontSize: 12)),
+                      onPressed: () => setState(() => _type.text = t),
+                    ),
+                ],
+              ),
+            ],
+            const SizedBox(height: 14),
+            TextField(
+              controller: _label,
+              autofocus: _isNew,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(
+                labelText: 'Nama opsi',
+                hintText: 'mis. Keju, Telur Ceplok, Large',
+              ),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: _price,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'Tambahan harga',
+                prefixText: '+Rp ',
+                helperText: 'kosongkan kalau tidak menambah harga',
+              ),
+            ),
+            if (_error != null) ...[
+              const SizedBox(height: 12),
+              Text(_error!, style: const TextStyle(color: AppTheme.unpaid, fontSize: 13)),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _saving ? null : () => Navigator.pop(context),
+          child: const Text('Batal'),
+        ),
+        FilledButton(
+          onPressed: _saving ? null : _save,
+          child: _saving
+              ? const SizedBox(
+                  width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+              : Text(_isNew ? 'Tambah' : 'Simpan'),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _save() async {
+    final type = _type.text.trim();
+    final label = _label.text.trim();
+    if (type.isEmpty) {
+      setState(() => _error = 'Jenis wajib diisi');
+      return;
+    }
+    if (label.isEmpty) {
+      setState(() => _error = 'Nama opsi wajib diisi');
+      return;
+    }
+
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+
+    final repo = ref.read(menuAdminRepositoryProvider);
+    final price = int.tryParse(_price.text.trim()) ?? 0;
+
+    try {
+      if (_isNew) {
+        await repo.createVariation(
+          menuItemId: widget.menuItemId,
+          variationType: type,
+          label: label,
+          extraPrice: price,
+        );
+      } else {
+        await repo.updateVariation(
+          widget.existing!.id,
+          menuItemId: widget.menuItemId,
+          variationType: type,
+          label: label,
+          extraPrice: price,
+        );
+      }
+      if (mounted) Navigator.pop(context, true);
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _saving = false;
+          _error = error.toString().replaceFirst('Exception: ', '');
+        });
+      }
+    }
+  }
+}
+
 // ------------------------------------------------------------ kategori ----
 
 class _CategoryEditorDialog extends ConsumerStatefulWidget {
@@ -961,8 +1304,19 @@ class _MenuEditorDialogState extends ConsumerState<_MenuEditorDialog> {
                   labelText: 'Keterangan (opsional)',
                 ),
               ),
+              if (_isNew)
+                const Padding(
+                  padding: EdgeInsets.only(top: 14),
+                  child: Text(
+                    'Topping & variasi bisa ditambahkan setelah menu ini '
+                    'disimpan.',
+                    style: TextStyle(fontSize: 12, color: Colors.black54),
+                  ),
+                ),
               if (!_isNew) ...[
-                const SizedBox(height: 8),
+                const Divider(height: 28),
+                _VariationsSection(menuItemId: widget.existing!.id),
+                const Divider(height: 28),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   value: _available,

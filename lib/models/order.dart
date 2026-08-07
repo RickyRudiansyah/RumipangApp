@@ -159,7 +159,10 @@ class OrderModel {
     return compact.length <= 6 ? compact : compact.substring(compact.length - 6);
   }
 
-  String get tableLabel => table?.label ?? 'Tanpa Meja';
+  /// Order tanpa `table_id` adalah pesanan bungkus. Ditulis "Take Away", bukan
+  /// "Tanpa Meja", supaya board kasir langsung terbaca sebagai jenis pesanan -
+  /// bukan sebagai data meja yang hilang.
+  String get tableLabel => table?.label ?? 'Take Away';
 
   // --- Aturan tombol (API-CONTRACT §3). Disamakan persis dengan web. ---
 

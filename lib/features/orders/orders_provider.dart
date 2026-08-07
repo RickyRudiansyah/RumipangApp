@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/failure.dart';
 import '../../core/providers.dart';
+import '../../models/enums.dart';
 import '../../models/order.dart';
 import 'pending_actions.dart';
 
@@ -37,6 +38,9 @@ class TableGroup {
 
   /// Tombol "Selesai" hanya boleh muncul kalau **semua** order di meja ini
   /// sudah `SERVED` **dan** `PAID` (API-CONTRACT §3).
+  ///
+  /// Yang sampai ke sini praktis selalu order tunai: yang QRIS diarsipkan
+  /// server begitu pembayarannya settle dan tidak pernah menetap di board.
   bool get canArchive => orders.isNotEmpty && orders.every((o) => o.isSettled);
 }
 
@@ -56,7 +60,33 @@ class CashierBoardNotifier extends AsyncNotifier<BoardData> {
     final store = ref.read(localStoreProvider);
 
     try {
-      final orders = await repo.cashierBoard();
+      var orders = await repo.cashierBoard();
+
+      // Sapuan pengaman, **khusus QRIS**: order yang uangnya sudah masuk
+      // sebelum ordernya lahir tidak menyisakan pekerjaan apa pun, jadi ia
+      // tidak boleh menetap di board kalau arsip di server sempat gagal.
+      //
+      // Order **tunai** sengaja dibiarkan - di situ masih ada uang dihitung dan
+      // kembalian diberikan, dan hanya kasir yang tahu kapan itu selesai. Ia
+      // menutupnya lewat tombol "Selesai" (keputusan pemilik).
+      final settled = orders
+          .where((o) => o.isSettled && o.paymentMethod == PaymentMethod.qris)
+          .toList();
+      if (settled.isNotEmpty) {
+        var archivedAny = false;
+        for (final order in settled) {
+          try {
+            await repo.archive(order.id);
+            archivedAny = true;
+          } on AppFailure {
+            // Biarkan tampil apa adanya; percobaan berikutnya ikut refresh.
+          }
+        }
+        // Sekali saja - hasil ambilan kedua dipakai apa adanya supaya tidak
+        // ada kemungkinan berputar tanpa henti kalau arsip selalu gagal.
+        if (archivedAny) orders = await repo.cashierBoard();
+      }
+
       await store.cacheBoard(_cacheKey, orders.map((o) => o.toJson()).toList());
       return BoardData(orders: orders, fromCache: false, updatedAt: DateTime.now());
     } on NetworkFailure {
@@ -102,7 +132,10 @@ class CashierBoardNotifier extends AsyncNotifier<BoardData> {
     await refresh();
   }
 
-  /// Arsipkan seluruh order di satu meja.
+  /// Arsipkan seluruh order di satu meja - tombol "Selesai" kasir.
+  ///
+  /// Dipakai untuk order **tunai**; yang QRIS sudah lebih dulu diarsipkan
+  /// server sendiri saat pembayarannya settle.
   Future<void> archiveGroup(TableGroup group) async {
     final repo = ref.read(orderRepositoryProvider);
     for (final order in group.orders) {

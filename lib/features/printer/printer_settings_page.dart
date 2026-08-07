@@ -66,13 +66,32 @@ class _PrinterSettingsPageState extends ConsumerState<PrinterSettingsPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        SizedBox(width: 400, child: _leftPane()),
-        const VerticalDivider(width: 1),
-        Expanded(child: _queuePane()),
-      ],
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // Panel printer 400 menyisakan ±199px untuk antrian di tablet potret -
+        // tidak cukup untuk satu baris job pun.
+        if (constraints.maxWidth < SplitLayout.printerPane) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Status printer + daftar perangkat tetap di atas: itu yang
+              // dicari kasir saat printer bermasalah.
+              Flexible(child: _leftPane()),
+              const Divider(height: 1),
+              Flexible(child: _queuePane()),
+            ],
+          );
+        }
+
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SizedBox(width: 400, child: _leftPane()),
+            const VerticalDivider(width: 1),
+            Expanded(child: _queuePane()),
+          ],
+        );
+      },
     );
   }
 
@@ -100,12 +119,16 @@ class _PrinterSettingsPageState extends ConsumerState<PrinterSettingsPage> {
                     color: printer.isConnected ? AppTheme.paid : AppTheme.unpaid,
                   ),
                   const SizedBox(width: 10),
-                  Text(
-                    printer.label,
-                    style: TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.w800,
-                      color: printer.isConnected ? AppTheme.paid : AppTheme.unpaid,
+                  Flexible(
+                    child: Text(
+                      printer.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w800,
+                        color: printer.isConnected ? AppTheme.paid : AppTheme.unpaid,
+                      ),
                     ),
                   ),
                 ],
@@ -197,13 +220,17 @@ class _PrinterSettingsPageState extends ConsumerState<PrinterSettingsPage> {
         // --- daftar perangkat ter-pair ---
         Row(
           children: [
-            const Text(
-              'PERANGKAT TER-PAIR',
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 1.1,
-                color: Colors.black45,
+            const Flexible(
+              child: Text(
+                'PERANGKAT TER-PAIR',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 1.1,
+                  color: Colors.black45,
+                ),
               ),
             ),
             const Spacer(),
@@ -278,9 +305,15 @@ class _PrinterSettingsPageState extends ConsumerState<PrinterSettingsPage> {
                 style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
               ),
               const SizedBox(width: 10),
-              const Text(
-                '50 job terakhir',
-                style: TextStyle(color: Colors.black45, fontSize: 13),
+              // Keterangan ini yang pertama dikorbankan saat ruang sempit -
+              // judul dan tombol muat ulang jauh lebih berguna.
+              const Flexible(
+                child: Text(
+                  '50 job terakhir',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: Colors.black45, fontSize: 13),
+                ),
               ),
               const Spacer(),
               TextButton.icon(
@@ -440,56 +473,59 @@ class _JobTile extends StatelessWidget {
     return Container(
       decoration: AppTheme.panel(),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          StatusChip(label: job.status.label, color: color, filled: true),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Text(
-                      '#${job.orderNo}',
-                      style: const TextStyle(fontWeight: FontWeight.w800),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      job.tableLabel,
-                      style: const TextStyle(color: Colors.black54, fontSize: 13),
-                    ),
-                    const SizedBox(width: 8),
-                    StatusChip(label: job.kind.label, color: Colors.black45),
-                  ],
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  '${job.trigger.label} · ${Fmt.dayClock(job.createdAt)}'
-                  '${job.attempts > 0 ? ' · ${job.attempts}x percobaan' : ''}',
-                  style: const TextStyle(fontSize: 12, color: Colors.black45),
-                ),
-                if (job.lastError != null)
-                  Text(
-                    job.lastError!,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 12, color: AppTheme.unpaid),
-                  ),
-              ],
-            ),
+          // Wrap, bukan Row: status + nomor + meja + jenis job tidak selalu
+          // muat sebaris di panel sempit.
+          Wrap(
+            spacing: 10,
+            runSpacing: 6,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              StatusChip(label: job.status.label, color: color, filled: true),
+              Text(
+                '#${job.orderNo}',
+                style: const TextStyle(fontWeight: FontWeight.w800),
+              ),
+              Text(
+                job.tableLabel,
+                style: const TextStyle(color: Colors.black54, fontSize: 13),
+              ),
+              StatusChip(label: job.kind.label, color: Colors.black45),
+            ],
           ),
-          IconButton(
-            tooltip: 'Pratinjau',
-            onPressed: onPreview,
-            icon: const Icon(Icons.visibility_outlined),
+          const SizedBox(height: 4),
+          Text(
+            '${job.trigger.label} · ${Fmt.dayClock(job.createdAt)}'
+            '${job.attempts > 0 ? ' · ${job.attempts}x percobaan' : ''}',
+            style: const TextStyle(fontSize: 12, color: Colors.black45),
           ),
-          if (job.status == PrintJobStatus.failed)
-            TextButton.icon(
-              onPressed: onRetry,
-              icon: const Icon(Icons.replay, size: 18),
-              label: const Text('Coba Lagi'),
+          if (job.lastError != null)
+            Text(
+              job.lastError!,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 12, color: AppTheme.unpaid),
             ),
+          const SizedBox(height: 4),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              if (job.status == PrintJobStatus.failed)
+                TextButton.icon(
+                  onPressed: onRetry,
+                  icon: const Icon(Icons.replay, size: 18),
+                  label: const Text('Coba Lagi'),
+                ),
+              IconButton(
+                tooltip: 'Pratinjau',
+                onPressed: onPreview,
+                icon: const Icon(Icons.visibility_outlined),
+                visualDensity: VisualDensity.compact,
+              ),
+            ],
+          ),
         ],
       ),
     );

@@ -8,6 +8,8 @@ class Fmt {
   static final DateFormat _clock = DateFormat('HH.mm', 'id_ID');
   static final DateFormat _dayClock = DateFormat('d MMM, HH.mm', 'id_ID');
   static final DateFormat _full = DateFormat('EEEE, d MMMM yyyy HH.mm', 'id_ID');
+  static final DateFormat _dayOnly = DateFormat('d MMMM yyyy', 'id_ID');
+  static final DateFormat _monthOnly = DateFormat('MMMM yyyy', 'id_ID');
 
   /// 27000 -> "Rp 27.000"
   static String rupiah(int amount) => 'Rp ${_rupiah.format(amount)}';
@@ -18,6 +20,13 @@ class Fmt {
   static String clock(DateTime time) => _clock.format(time);
   static String dayClock(DateTime time) => _dayClock.format(time);
   static String full(DateTime time) => _full.format(time);
+
+  /// "7 Agustus 2026" - dipakai saat memilih periode, bukan saat menampilkan
+  /// waktu kejadian.
+  static String dayOnly(DateTime time) => _dayOnly.format(time);
+
+  /// "Agustus 2026"
+  static String monthOnly(DateTime time) => _monthOnly.format(time);
 
   /// "baru saja", "3 mnt lalu", "2 jam lalu"
   static String ago(DateTime time) {

@@ -39,6 +39,20 @@ class OrderRepository {
   Future<List<OrderModel>> history() async =>
       _parseList(await _api.get('/api/orders/history'));
 
+  /// Hapus riwayat. Tanpa rentang berarti **seluruh** riwayat.
+  ///
+  /// [from] inklusif, [to] eksklusif, dan keduanya dikirim setelah dikonversi
+  /// ke UTC. Batas "hari" ditentukan pemanggil dari jam tablet (WIB), bukan
+  /// oleh server: tengah malam UTC jatuh pukul 07.00 pagi di warung, tepat di
+  /// tengah hari kerja.
+  Future<int> deleteHistory({DateTime? from, DateTime? to}) async {
+    final res = await _api.delete('/api/orders/history', query: {
+      if (from != null) 'from': from.toUtc().toIso8601String(),
+      if (to != null) 'to': to.toUtc().toIso8601String(),
+    });
+    return asInt(asMap(res)['deleted']);
+  }
+
   /// **Satu-satunya** cara melunasi order tunai. Memicu pembuatan job cetak
   /// di server.
   Future<MarkPaidResult> markPaid(String orderId) async {

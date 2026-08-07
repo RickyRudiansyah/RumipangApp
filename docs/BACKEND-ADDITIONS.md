@@ -329,6 +329,70 @@ is_active = true`.
 
 ---
 
+## 5b. Owner mengelola karyawan
+
+Owner bisa menambah karyawan dan mengubah namanya langsung dari layar Jatah
+Makan. Tombolnya **hanya muncul untuk role `owner`** — kasir tidak melihatnya.
+
+| Method | Path | Isi |
+|---|---|---|
+| `POST` | `/api/staff` | `{name, role, email?}` → 201 objek staff |
+| `PATCH` | `/api/staff/:id` | `{name, role?, email?, is_active?}` |
+
+Keduanya **khusus owner**. Kasir yang memanggilnya harus dibalas 403.
+
+### ⚠️ Keputusan yang harus diambil: akun login
+
+`staff_users.id` di skema sekarang diisi UUID dari Supabase Auth — baris staff
+dibuat setelah akunnya ada. Tapi karyawan yang hanya menerima jatah makan
+**tidak perlu bisa login sama sekali**.
+
+Tiga pilihan, urut dari yang saya sarankan:
+
+1. **Izinkan baris tanpa akun auth.** `POST /api/staff` membuat baris dengan
+   `gen_random_uuid()` dan `email` boleh null. Karyawan itu tercatat untuk
+   jatah makan tapi tidak bisa masuk aplikasi. Kalau suatu saat perlu login,
+   owner membuat akunnya di Supabase lalu menautkan. Paling sederhana, dan
+   sesuai kebutuhan yang ada sekarang.
+   *Syarat:* pastikan `staff_users.id` **tidak** punya foreign key ke
+   `auth.users`. Kalau ada, hapus dulu constraint-nya.
+
+2. **Server membuat akun auth sekaligus** lewat admin API service role, dengan
+   kata sandi sementara. Lebih lengkap, tapi butuh alur pengiriman/penggantian
+   kata sandi yang belum ada.
+
+3. **Tolak `POST /api/staff`** dan tetap buat karyawan manual di Supabase.
+   Aplikasi akan menampilkan pesan errornya apa adanya. Pilih ini kalau
+   menambah karyawan memang jarang terjadi.
+
+Aplikasi sudah menyiapkan UI untuk pilihan 1 dan 2 — email ditandai opsional,
+dengan keterangan "hanya perlu kalau karyawan ini ikut memakai aplikasi".
+
+Peran yang ditawarkan aplikasi hanya **`cashier`** dan **`owner`**; `koki`
+sengaja tidak ada karena dapur sudah dipensiunkan (§7). Baris lama berperan
+`koki` tetap valid — jangan hapus constraint-nya.
+
+---
+
+## 5c. Topping & variasi menu — ✅ TIDAK ADA PEKERJAAN
+
+Aplikasi sekarang bisa menambah, mengubah, dan menghapus topping/variasi per
+menu (mis. "Extra Topping" → Keju +Rp 5.000). Seluruh endpointnya **sudah ada
+di web**:
+
+| Endpoint | Status |
+|---|---|
+| `GET /api/menu/variations` | ✅ sudah ada |
+| `POST /api/menu/variations` | ✅ sudah ada |
+| `PUT /api/menu/variations/[id]` | ✅ sudah ada |
+| `DELETE /api/menu/variations/[id]` | ✅ sudah ada |
+
+Aplikasi mengirim `menu_item_id`, `variation_type`, `label`, dan `extra_price`
+— sama persis dengan yang dipakai `VariationManager` di web. Tidak ada kolom
+atau endpoint baru.
+
+---
+
 ## 6. Tema event (aplikasi **dan** web ikut berubah)
 
 Owner memilih tema dari aplikasi kasir; web membaca nilai yang sama.
@@ -482,10 +546,11 @@ bisa menyusul.
 |---|---|---|
 | **Menu** | POST, PUT, DELETE, sold-out, GET | kolom `cost_price`; `image_url` harus tersimpan lewat PUT |
 | **Kategori** | `GET /api/menu/categories` | `POST /api/menu/categories` + unique index |
+| **Topping/variasi** | GET, POST, PUT, DELETE | — (sudah lengkap) |
 | **Foto** | `POST /api/upload` | pastikan bentuk respons terbaca (§2) |
 | **Order** | seluruh alur | `status='SERVED'` saat dibuat |
 | **Laporan** | top menu di halaman owner | endpoint + kolom biaya |
-| **Staff** | tabel `staff_users` | `GET /api/staff` |
+| **Staff** | tabel `staff_users` | `GET /api/staff`, `POST /api/staff`, `PATCH /api/staff/:id` (§5b) |
 | **Tema** | dark mode (per perangkat) | `app_settings` + 2 endpoint |
 | **Stok bahan** | — | tabel + 4 endpoint |
 | **Jatah makan** | — | tabel + 4 endpoint |

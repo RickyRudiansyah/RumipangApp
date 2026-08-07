@@ -50,6 +50,88 @@ class StatusChip extends StatelessWidget {
   }
 }
 
+/// Chip pilihan: variasi menu, peran karyawan, rentang laporan.
+///
+/// Warnanya **ditulis eksplisit** dan tidak menumpang bawaan `ChoiceChip`.
+/// Bawaannya mengambil warna dari `ColorScheme.fromSeed` yang ikut berubah tiap
+/// tema event diganti, dan pada beberapa preset label yang belum terpilih nyaris
+/// tidak terbaca di atas latar dialog - kasir harus menekan satu per satu dulu
+/// untuk tahu isinya. Ini pernah terjadi pada daftar topping.
+class OptionChip extends StatelessWidget {
+  const OptionChip({
+    super.key,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    this.trailing,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  /// Mis. "+2.000". Diberi warna sendiri supaya harga tambahan terbaca sebagai
+  /// angka, bukan bagian dari nama pilihan.
+  final String? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    final foreground = selected ? AppTheme.brand : const Color(0xFF231A12);
+
+    return Material(
+      color: selected ? AppTheme.brand.withValues(alpha: 0.10) : Colors.white,
+      borderRadius: BorderRadius.circular(10),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: onTap,
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 44),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: selected ? AppTheme.brand : AppTheme.border,
+              width: selected ? 1.6 : 1,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                selected ? Icons.check_circle : Icons.circle_outlined,
+                size: 18,
+                color: selected ? AppTheme.brand : Colors.black38,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+                  color: foreground,
+                ),
+              ),
+              if (trailing != null) ...[
+                const SizedBox(width: 8),
+                Text(
+                  trailing!,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: selected
+                        ? AppTheme.brand
+                        : AppTheme.warn.withValues(alpha: 0.95),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class OrderStatusChip extends StatelessWidget {
   const OrderStatusChip(this.status, {super.key});
 

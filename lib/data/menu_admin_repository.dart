@@ -91,6 +91,47 @@ class MenuAdminRepository {
   /// `menu_item_name` dan `menu_item_price` sebagai snapshot.
   Future<void> remove(String id) => _api.delete('/api/menu/$id');
 
+  // ------------------------------------------------ topping & variasi ----
+
+  /// Endpoint variasi **sudah ada semua di web** — tidak ada pekerjaan backend
+  /// untuk fitur ini.
+  ///
+  /// `variationType` adalah nama grupnya ("Extra Topping", "Ukuran"), `label`
+  /// nama opsinya ("Keju"), dan `extraPrice` tambahan harganya.
+  Future<MenuVariation> createVariation({
+    required String menuItemId,
+    required String variationType,
+    required String label,
+    required int extraPrice,
+  }) async {
+    final json = await _api.post('/api/menu/variations', body: {
+      'menu_item_id': menuItemId,
+      'variation_type': variationType,
+      'label': label,
+      'extra_price': extraPrice,
+    });
+    return MenuVariation.fromJson(Map<String, dynamic>.from(json as Map));
+  }
+
+  Future<MenuVariation> updateVariation(
+    String id, {
+    required String menuItemId,
+    required String variationType,
+    required String label,
+    required int extraPrice,
+  }) async {
+    final json = await _api.put('/api/menu/variations/$id', body: {
+      'menu_item_id': menuItemId,
+      'variation_type': variationType,
+      'label': label,
+      'extra_price': extraPrice,
+    });
+    return MenuVariation.fromJson(Map<String, dynamic>.from(json as Map));
+  }
+
+  Future<void> deleteVariation(String id) =>
+      _api.delete('/api/menu/variations/$id');
+
   // ---------------------------------------------------------- kategori ----
 
   /// Tambah kategori baru (Minuman, Nasi, ...).

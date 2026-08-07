@@ -21,36 +21,172 @@ class NewOrderPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final menu = ref.watch(menuProvider);
 
-    final grid = menu.when(
-      loading: () => const Center(child: CircularProgressIndicator()),
-      error: (e, _) => ErrorView(
-        message: e is AppFailure ? e.message : 'Gagal memuat menu.\n$e',
-        onRetry: () => ref.invalidate(menuProvider),
-      ),
-      data: (_) => const _MenuGrid(),
-    );
-
-    // Keranjang selebar 400 tidak muat di HP - lebih lebar dari layarnya
-    // sendiri. Di layar sempit keranjang pindah ke lembar bawah, dipanggil
-    // dari bilah ringkasan yang selalu terlihat.
-    if (context.isCompact) {
-      return Column(
-        children: [
-          Expanded(child: grid),
-          const _CartBar(),
-        ],
-      );
-    }
-
-    return Row(
+    final grid = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Expanded(child: grid),
-        const VerticalDivider(width: 1),
-        const SizedBox(width: 400, child: _CartPane()),
+        const _MenuToolbar(),
+        Expanded(
+          child: menu.when(
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (e, _) => ErrorView(
+              message: e is AppFailure ? e.message : 'Gagal memuat menu.\n$e',
+              onRetry: () => refreshCatalog(ref),
+            ),
+            data: (_) => const _MenuGrid(),
+          ),
+        ),
       ],
     );
+
+    // Keranjang selebar 400 menyisakan ruang yang tidak cukup untuk grid menu
+    // di layar sempit - dan di HP malah lebih lebar dari layarnya sendiri.
+    // Diukur dari lebar nyata, bukan kategori layar: tablet potret pun terlalu
+    // sempit untuk dua panel.
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < SplitLayout.posCart) {
+          return Column(
+            children: [
+              Expanded(child: grid),
+              const _CartBar(),
+            ],
+          );
+        }
+
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(child: grid),
+            const VerticalDivider(width: 1),
+            const SizedBox(width: 400, child: _CartPane()),
+          ],
+        );
+      },
+    );
   }
+}
+
+/// Cari menu, saring per kategori, dan muat ulang katalog.
+///
+/// Tombol muat ulang bukan hiasan: menu yang baru ditambahkan dari tab Menu
+/// atau dari dashboard web tidak muncul di sini sampai katalognya diambil ulang.
+class _MenuToolbar extends ConsumerStatefulWidget {
+  const _MenuToolbar();
+
+  @override
+  ConsumerState<_MenuToolbar> createState() => _MenuToolbarState();
+}
+
+class _MenuToolbarState extends ConsumerState<_MenuToolbar> {
+  final _controller = TextEditingController();
+  bool _refreshing = false;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _refresh() async {
+    setState(() => _refreshing = true);
+    refreshCatalog(ref);
+    try {
+      await ref.read(menuProvider.future);
+      if (mounted) showSnack(context, 'Menu dimuat ulang.');
+    } on AppFailure catch (e) {
+      if (mounted) showSnack(context, e.message, error: true);
+    } catch (_) {
+      // Pesan errornya sudah tampil di grid lewat ErrorView.
+    } finally {
+      if (mounted) setState(() => _refreshing = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final categories = ref.watch(posCategoryNamesProvider);
+    final active = ref.watch(posCategoryProvider);
+    final query = ref.watch(posQueryProvider);
+
+    return Container(
+      color: Colors.white,
+      padding: const EdgeInsets.fromLTRB(20, 14, 12, 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _controller,
+                  textInputAction: TextInputAction.search,
+                  decoration: InputDecoration(
+                    isDense: true,
+                    hintText: 'Cari menu',
+                    prefixIcon: const Icon(Icons.search),
+                    suffixIcon: query.isEmpty
+                        ? null
+                        : IconButton(
+                            tooltip: 'Hapus pencarian',
+                            icon: const Icon(Icons.close),
+                            onPressed: () {
+                              _controller.clear();
+                              ref.read(posQueryProvider.notifier).setQuery('');
+                            },
+                          ),
+                  ),
+                  onChanged: (v) => ref.read(posQueryProvider.notifier).setQuery(v),
+                ),
+              ),
+              const SizedBox(width: 6),
+              _refreshing
+                  ? const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 14),
+                      child: SizedBox(
+                        height: 20,
+                        width: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    )
+                  : IconButton(
+                      tooltip: 'Muat ulang menu',
+                      onPressed: _refresh,
+                      icon: const Icon(Icons.refresh),
+                    ),
+            ],
+          ),
+          if (categories.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            SizedBox(
+              height: 44,
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                children: [
+                  _categoryChip(label: 'Semua', value: null, active: active == null),
+                  for (final name in categories)
+                    _categoryChip(label: name, value: name, active: active == name),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _categoryChip({
+    required String label,
+    required String? value,
+    required bool active,
+  }) =>
+      Padding(
+        padding: const EdgeInsets.only(right: 8),
+        child: OptionChip(
+          label: label,
+          selected: active,
+          onTap: () => ref.read(posCategoryProvider.notifier).select(active ? null : value),
+        ),
+      );
 }
 
 /// Bilah keranjang di bawah layar HP.
@@ -125,7 +261,22 @@ class _MenuGrid extends ConsumerWidget {
     final categories = ref.watch(menuByCategoryProvider);
 
     if (categories.isEmpty) {
-      return const EmptyState(icon: Icons.restaurant_menu, title: 'Menu kosong');
+      // Dibedakan supaya kasir tidak menyangka menunya hilang padahal hanya
+      // tersaring kata kunci / kategori.
+      final filtering = ref.watch(posQueryProvider).trim().isNotEmpty ||
+          ref.watch(posCategoryProvider) != null;
+
+      return filtering
+          ? const EmptyState(
+              icon: Icons.search_off,
+              title: 'Menu tidak ditemukan',
+              subtitle: 'Ubah kata kunci atau pilih kategori "Semua".',
+            )
+          : const EmptyState(
+              icon: Icons.restaurant_menu,
+              title: 'Menu kosong',
+              subtitle: 'Tambahkan menu di tab Menu, lalu tekan muat ulang.',
+            );
     }
 
     return CustomScrollView(
@@ -249,55 +400,78 @@ class _VariationDialog extends StatefulWidget {
 }
 
 class _VariationDialogState extends State<_VariationDialog> {
+  /// Pilihan per jenis variasi. Jenis yang **tidak ada** di map berarti
+  /// "tanpa" - dan itu pilihan yang sah, bukan keadaan setengah jadi.
   final Map<String, MenuVariation> _selected = {};
 
   @override
   void initState() {
     super.initState();
-    // Pilihan pertama tiap jenis dipakai sebagai default supaya kasir bisa
-    // langsung menekan Tambah saat pelanggan tidak minta apa-apa.
+    // Hanya pilihan **gratis** yang boleh terpilih sendiri. Dulu opsi pertama
+    // tiap jenis selalu dipakai sebagai default; kalau kebetulan itu topping
+    // berbayar, setiap porsi ikut ditagih topping yang tidak diminta siapa pun
+    // dan harga dasar menu jadi tidak pernah benar. Ini pernah terjadi.
     widget.byType.forEach((type, options) {
-      if (options.isNotEmpty) _selected[type] = options.first;
+      for (final option in options) {
+        if (option.extraPrice == 0) {
+          _selected[type] = option;
+          break;
+        }
+      }
     });
   }
 
   int get _extra => _selected.values.fold(0, (sum, v) => sum + v.extraPrice);
+
+  /// "Tanpa extra topping" - label yang membaca wajar untuk jenis apa pun.
+  String _noneLabel(String type) => 'Tanpa ${type.toLowerCase()}';
 
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
       title: Text(widget.item.name),
       content: SizedBox(
-        width: context.dialogWidth(420),
+        width: context.dialogWidth(460),
         child: SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
+              Text(
+                'Harga dasar ${Fmt.rupiah(widget.item.price)}',
+                style: const TextStyle(fontSize: 13, color: Colors.black54),
+              ),
               for (final entry in widget.byType.entries) ...[
                 Padding(
-                  padding: const EdgeInsets.only(top: 8, bottom: 6),
+                  padding: const EdgeInsets.only(top: 16, bottom: 8),
                   child: Text(
                     entry.key,
-                    style: const TextStyle(fontWeight: FontWeight.w700),
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 15,
+                    ),
                   ),
                 ),
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
-                  children: entry.value.map((option) {
-                    final active = _selected[entry.key]?.id == option.id;
-                    return ChoiceChip(
-                      selected: active,
-                      onSelected: (_) =>
-                          setState(() => _selected[entry.key] = option),
-                      label: Text(
-                        option.extraPrice == 0
-                            ? option.label
-                            : '${option.label} +${Fmt.number(option.extraPrice)}',
+                  children: [
+                    // Selalu ada jalan keluar dari sebuah jenis variasi.
+                    OptionChip(
+                      label: _noneLabel(entry.key),
+                      selected: !_selected.containsKey(entry.key),
+                      onTap: () => setState(() => _selected.remove(entry.key)),
+                    ),
+                    for (final option in entry.value)
+                      OptionChip(
+                        label: option.label,
+                        selected: _selected[entry.key]?.id == option.id,
+                        trailing: option.extraPrice == 0
+                            ? null
+                            : '+${Fmt.number(option.extraPrice)}',
+                        onTap: () => setState(() => _selected[entry.key] = option),
                       ),
-                    );
-                  }).toList(),
+                  ],
                 ),
               ],
             ],
@@ -308,7 +482,11 @@ class _VariationDialogState extends State<_VariationDialog> {
         TextButton(onPressed: () => Navigator.pop(context), child: const Text('Batal')),
         FilledButton(
           onPressed: () => Navigator.pop(context, _selected.values.toList()),
-          child: Text('Tambah · ${Fmt.rupiah(widget.item.price + _extra)}'),
+          child: Text(
+            _extra == 0
+                ? 'Tambah · ${Fmt.rupiah(widget.item.price)}'
+                : 'Tambah · ${Fmt.rupiah(widget.item.price + _extra)}',
+          ),
         ),
       ],
     );
@@ -376,10 +554,18 @@ class _CartPaneState extends ConsumerState<_CartPane> {
               children: [
                 OutlinedButton.icon(
                   onPressed: () => _pickTable(tables),
-                  icon: const Icon(Icons.table_restaurant),
+                  icon: Icon(
+                    cart.tableId == null
+                        ? Icons.takeout_dining
+                        : Icons.table_restaurant,
+                  ),
                   label: Align(
                     alignment: Alignment.centerLeft,
-                    child: Text(_tableLabel(cart.tableId, tables)),
+                    child: Text(
+                      _tableLabel(cart.tableId, tables),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -448,12 +634,16 @@ class _CartPaneState extends ConsumerState<_CartPane> {
   }
 
   String _tableLabel(String? tableId, List<CafeTable> tables) {
-    if (tableId == null) return 'Tanpa meja';
+    if (tableId == null) return _takeAwayLabel;
     for (final table in tables) {
       if (table.id == tableId) return table.label;
     }
     return 'Meja tidak dikenal';
   }
+
+  /// Order tanpa meja hampir selalu dibungkus. "Tanpa meja" saja membuat kasir
+  /// ragu apakah itu pilihan yang benar; kata "Take Away" yang menjawabnya.
+  static const _takeAwayLabel = 'Take Away · Tanpa Meja';
 
   Future<void> _pickTable(List<CafeTable> tables) async {
     final selected = await showDialog<String?>(
@@ -463,7 +653,13 @@ class _CartPaneState extends ConsumerState<_CartPane> {
         children: [
           SimpleDialogOption(
             onPressed: () => Navigator.pop(ctx, _noTable),
-            child: const Text('Tanpa meja'),
+            child: const Row(
+              children: [
+                Icon(Icons.takeout_dining, size: 20),
+                SizedBox(width: 10),
+                Text(_takeAwayLabel),
+              ],
+            ),
           ),
           const Divider(),
           ...tables.map(
@@ -479,7 +675,8 @@ class _CartPaneState extends ConsumerState<_CartPane> {
     ref.read(cartProvider.notifier).setTable(selected == _noTable ? null : selected);
   }
 
-  /// Penanda "tanpa meja" supaya bisa dibedakan dari dialog yang dibatalkan.
+  /// Penanda "take away / tanpa meja" supaya bisa dibedakan dari dialog yang
+  /// ditutup tanpa memilih.
   static const _noTable = '__none__';
 
   Future<void> _submit() async {

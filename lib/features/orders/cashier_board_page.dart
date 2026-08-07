@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/failure.dart';
 import '../../models/order.dart';
 import '../../shared/format.dart';
+import '../../shared/layout.dart';
 import '../../shared/theme.dart';
 import '../../shared/widgets.dart';
 import '../auth/staff_provider.dart';
@@ -63,48 +64,48 @@ class CashierBoardPage extends ConsumerWidget {
           subtitle: 'Order yang masuk akan muncul di sini secara otomatis.',
         );
 
-        // Di HP master-detail tidak muat berdampingan: panel meja 264px
-        // menyisakan ruang yang tidak cukup untuk detail order. Jadi daftar
-        // meja dan detailnya ditumpuk - detail dibuka sebagai halaman baru.
-        if (context.isCompact) {
-          return Column(
-            children: [
-              if (data.fromCache)
-                OfflineBanner(updatedAt: data.updatedAt, pendingActions: pending.length),
-              Expanded(
-                child: groups.isEmpty
-                    ? emptyState
-                    : _TableList(
-                        groups: groups,
-                        selected: null,
-                        onOpen: (group) => Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                            builder: (_) => _TableDetailPage(tableKey: group.key),
-                          ),
-                        ),
-                      ),
-              ),
-            ],
-          );
-        }
+        final selectedGroup = selected;
 
         return Column(
           children: [
             if (data.fromCache)
               OfflineBanner(updatedAt: data.updatedAt, pendingActions: pending.length),
             Expanded(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  SizedBox(
-                    width: 264,
-                    child: _TableList(groups: groups, selected: selected),
-                  ),
-                  const VerticalDivider(width: 1),
-                  Expanded(
-                    child: selected == null ? emptyState : _TableDetail(group: selected),
-                  ),
-                ],
+              // Diukur dari lebar yang benar-benar tersedia, bukan lebar layar:
+              // tablet potret masih "medium" tapi sisa ruangnya setelah panel
+              // meja tidak cukup untuk detail order.
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  if (constraints.maxWidth < SplitLayout.cashierBoard) {
+                    return groups.isEmpty
+                        ? emptyState
+                        : _TableList(
+                            groups: groups,
+                            selected: null,
+                            onOpen: (group) => Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) => _TableDetailPage(tableKey: group.key),
+                              ),
+                            ),
+                          );
+                  }
+
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      SizedBox(
+                        width: 264,
+                        child: _TableList(groups: groups, selected: selectedGroup),
+                      ),
+                      const VerticalDivider(width: 1),
+                      Expanded(
+                        child: selectedGroup == null
+                            ? emptyState
+                            : _TableDetail(group: selectedGroup),
+                      ),
+                    ],
+                  );
+                },
               ),
             ),
           ],
@@ -118,11 +119,56 @@ extension on TableGroup {
   String get key => tableId ?? '_none';
 }
 
+/// Halaman detail meja untuk layar HP.
+///
+/// Sengaja mengambil ulang grup dari [tableGroupsProvider] lewat `tableKey`,
+/// bukan menerima objek [TableGroup] jadi - supaya isinya tetap ikut berubah
+/// saat realtime memperbarui board selagi halaman ini terbuka.
+class _TableDetailPage extends ConsumerWidget {
+  const _TableDetailPage({required this.tableKey});
+
+  final String tableKey;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final groups = ref.watch(tableGroupsProvider);
+
+    TableGroup? group;
+    for (final g in groups) {
+      if (g.key == tableKey) {
+        group = g;
+        break;
+      }
+    }
+
+    return Scaffold(
+      appBar: AppBar(title: Text(group?.label ?? 'Meja')),
+      body: group == null
+          // Meja bisa hilang saat order terakhirnya diarsipkan dari perangkat
+          // lain. Menutup halaman sendiri lebih baik daripada layar kosong.
+          ? const EmptyState(
+              icon: Icons.check_circle_outline,
+              title: 'Meja ini sudah selesai',
+              subtitle: 'Semua ordernya sudah diarsipkan.',
+            )
+          : _TableDetail(group: group),
+    );
+  }
+}
+
 class _TableList extends ConsumerWidget {
-  const _TableList({required this.groups, required this.selected});
+  const _TableList({
+    required this.groups,
+    required this.selected,
+    this.onOpen,
+  });
 
   final List<TableGroup> groups;
   final TableGroup? selected;
+
+  /// Diisi hanya di layar HP, saat detail dibuka sebagai halaman baru.
+  /// Kalau null, ketukan cukup mengubah pilihan di panel kanan.
+  final void Function(TableGroup)? onOpen;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -164,8 +210,10 @@ class _TableList extends ConsumerWidget {
                   borderRadius: BorderRadius.circular(12),
                   child: InkWell(
                     borderRadius: BorderRadius.circular(12),
-                    onTap: () =>
-                        ref.read(selectedTableProvider.notifier).select(group.key),
+                    onTap: () {
+                      ref.read(selectedTableProvider.notifier).select(group.key);
+                      onOpen?.call(group);
+                    },
                     child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                       child: Row(
@@ -245,9 +293,13 @@ class _TableDetail extends ConsumerWidget {
           padding: const EdgeInsets.fromLTRB(20, 18, 20, 10),
           child: Row(
             children: [
-              Text(
-                group.label,
-                style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
+              Flexible(
+                child: Text(
+                  group.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
+                ),
               ),
               const SizedBox(width: 12),
               Text(
@@ -255,6 +307,7 @@ class _TableDetail extends ConsumerWidget {
                 style: const TextStyle(color: Colors.black54, fontSize: 15),
               ),
               const Spacer(),
+              const SizedBox(width: 8),
               Text(
                 Fmt.rupiah(group.total),
                 style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
@@ -278,6 +331,12 @@ class _TableDetail extends ConsumerWidget {
   }
 }
 
+/// Tombol "Selesai" untuk order **tunai**.
+///
+/// Order QRIS tidak pernah sampai ke sini: uangnya sudah masuk sebelum ordernya
+/// lahir, jadi server mengarsipkannya sendiri begitu pembayarannya settle
+/// (lib/archive.ts di web). Yang tunai ditutup manual - masih ada uang dihitung
+/// dan kembalian diberikan, dan hanya kasir yang tahu kapan itu selesai.
 class _ArchiveBar extends ConsumerStatefulWidget {
   const _ArchiveBar({required this.group});
 
@@ -297,39 +356,59 @@ class _ArchiveBarState extends ConsumerState<_ArchiveBar> {
     // "Selesai" hanya boleh muncul kalau SEMUA order di meja ini SERVED + PAID.
     final blocked = !group.canArchive;
 
+    final hint = Text(
+      blocked
+          ? 'Meja bisa diselesaikan setelah semua order diantar dan lunas.'
+          : 'Semua order sudah diantar dan lunas.',
+      style: TextStyle(
+        fontSize: 13,
+        color: blocked ? Colors.black54 : AppTheme.paid,
+        fontWeight: blocked ? FontWeight.normal : FontWeight.w600,
+      ),
+    );
+
+    Widget button({required bool long}) => FilledButton.icon(
+          onPressed: blocked || _busy ? null : _archive,
+          icon: _busy
+              ? const SizedBox(
+                  height: 18,
+                  width: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                )
+              : const Icon(Icons.done_all),
+          label: Text(long ? 'Selesai · Pindahkan ke History' : 'Selesai'),
+        );
+
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
       decoration: BoxDecoration(
         color: Colors.white,
         border: Border(top: BorderSide(color: AppTheme.border)),
       ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              blocked
-                  ? 'Meja bisa diselesaikan setelah semua order diantar dan lunas.'
-                  : 'Semua order sudah diantar dan lunas.',
-              style: TextStyle(
-                fontSize: 13,
-                color: blocked ? Colors.black54 : AppTheme.paid,
-                fontWeight: blocked ? FontWeight.normal : FontWeight.w600,
-              ),
-            ),
-          ),
-          const SizedBox(width: 16),
-          FilledButton.icon(
-            onPressed: blocked || _busy ? null : _archive,
-            icon: _busy
-                ? const SizedBox(
-                    height: 18,
-                    width: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                  )
-                : const Icon(Icons.done_all),
-            label: const Text('Selesai · Pindahkan ke History'),
-          ),
-        ],
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          // Tombol berlabel panjang memakan hampir seluruh lebar di panel
+          // sempit, menyisakan beberapa piksel untuk teks - hasilnya pecah
+          // satu huruf per baris.
+          if (constraints.maxWidth < SplitLayout.textWithAction) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                hint,
+                const SizedBox(height: 10),
+                button(long: false),
+              ],
+            );
+          }
+
+          return Row(
+            children: [
+              Expanded(child: hint),
+              const SizedBox(width: 16),
+              button(long: true),
+            ],
+          );
+        },
       ),
     );
   }
@@ -388,7 +467,13 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
+          // Wrap, bukan Row: nomor order + jam + dua chip status tidak selalu
+          // muat sebaris di panel sempit, dan chip pembayaran adalah hal
+          // terakhir yang boleh terpotong.
+          Wrap(
+            spacing: 10,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               Text(
                 '#${order.orderNo}',
@@ -398,23 +483,18 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                   fontFeatures: [FontFeature.tabularFigures()],
                 ),
               ),
-              const SizedBox(width: 10),
               Text(
                 Fmt.clock(order.createdAt),
                 style: const TextStyle(color: Colors.black54),
               ),
-              const SizedBox(width: 12),
               OrderStatusChip(order.status),
-              const SizedBox(width: 8),
               PaymentChip(order.paymentStatus, method: order.paymentMethod),
-              if (isPendingSync) ...[
-                const SizedBox(width: 8),
+              if (isPendingSync)
                 const StatusChip(
                   label: 'menunggu terkirim',
                   color: AppTheme.warn,
                   icon: Icons.sync_problem,
                 ),
-              ],
             ],
           ),
           const SizedBox(height: 12),

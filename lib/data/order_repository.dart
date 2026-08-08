@@ -50,6 +50,19 @@ class OrderRepository {
         'from': since.toUtc().toIso8601String(),
       }));
 
+  /// Sapu pembayaran QRIS yang tertinggal, kembalikan jumlah yang diselamatkan.
+  ///
+  /// Order QRIS hanya lahir dari `settleIntent()` di server, dan pemicunya
+  /// (tab checkout pelanggan + webhook) sama-sama rapuh. Kalau keduanya gagal,
+  /// pelanggan sudah membayar tapi ordernya tidak pernah ada - pernah terjadi,
+  /// dua order senilai Rp 107.000 hilang begitu saja. Tablet ini satu-satunya
+  /// perangkat yang menyala sepanjang hari, jadi ia yang jadi jaring
+  /// pengamannya.
+  Future<int> reconcilePayments() async {
+    final res = asMap(await _api.post('/api/payments/reconcile'));
+    return asInt(res['recovered']);
+  }
+
   /// Hapus riwayat. Tanpa rentang berarti **seluruh** riwayat.
   ///
   /// [from] inklusif, [to] eksklusif, dan keduanya dikirim setelah dikonversi

@@ -91,6 +91,32 @@ class PrintQueueController extends Notifier<PrintQueueState> {
     unawaited(pump());
     // Hitungan untuk layar monitoring tidak perlu sesering loop cetak.
     if (_tick % 5 == 0) unawaited(refreshMonitor());
+
+    // Sapuan pembayaran QRIS yang tertinggal, ~2 menit sekali.
+    //
+    // Menumpang loop ini karena inilah satu-satunya yang benar-benar berjalan
+    // sepanjang hari (foreground service, tablet selalu menyala di kasir).
+    // Servernya sendiri tidak punya penjadwal, dan webhook Midtrans terbukti
+    // bisa tidak sampai - lihat lib/reconcile.ts di repo web.
+    if (_tick % 30 == 0) unawaited(_reconcilePayments());
+  }
+
+  /// Selamatkan order QRIS yang uangnya sudah masuk tapi ordernya tidak pernah
+  /// dibuat. Sengaja diam saat tidak ada apa-apa; hanya bersuara kalau benar-
+  /// benar ada yang diselamatkan.
+  Future<void> _reconcilePayments() async {
+    try {
+      final recovered = await ref.read(orderRepositoryProvider).reconcilePayments();
+      if (recovered > 0) {
+        state = state.copyWith(
+          lastError: '$recovered pembayaran QRIS tertinggal berhasil '
+              'diselamatkan - ordernya baru saja masuk.',
+        );
+      }
+    } on AppFailure {
+      // Jaring pengaman, bukan jalur utama. Kegagalannya tidak boleh
+      // mengganggu antrian cetak.
+    }
   }
 
   // -------------------------------------------------------------- pump -----

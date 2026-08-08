@@ -108,6 +108,14 @@ class _MenuToolbarState extends ConsumerState<_MenuToolbar> {
     final active = ref.watch(posCategoryProvider);
     final query = ref.watch(posQueryProvider);
 
+    // Kotak cari dikosongkan dari luar (setelah order dibuat), jadi teks di
+    // dalamnya harus ikut - kalau tidak, kolomnya masih berisi kata kunci lama
+    // sementara saringannya sudah mati. Membingungkan justru karena tidak ada
+    // yang tersaring.
+    ref.listen<String>(posQueryProvider, (_, next) {
+      if (next.isEmpty && _controller.text.isNotEmpty) _controller.clear();
+    });
+
     return Container(
       color: Colors.white,
       padding: const EdgeInsets.fromLTRB(20, 14, 12, 10),
@@ -169,9 +177,62 @@ class _MenuToolbarState extends ConsumerState<_MenuToolbar> {
               ),
             ),
           ],
+
+          // Filter yang menyala tanpa disadari adalah jebakan: menunya terlihat
+          // "hilang", dan satu-satunya jalan keluar yang ditemukan kasir adalah
+          // menutup paksa aplikasi. Chip yang tersorot saja ternyata tidak
+          // cukup terlihat saat sedang buru-buru melayani.
+          if (active != null || query.trim().isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Material(
+              color: AppTheme.warn.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(10),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(10),
+                onTap: _clearFilters,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.filter_alt, size: 18, color: AppTheme.warn),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          active != null
+                              ? 'Hanya menampilkan "$active"'
+                              : 'Hasil pencarian "${query.trim()}"',
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      const Text(
+                        'TAMPILKAN SEMUA',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                          color: AppTheme.warn,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );
+  }
+
+  /// Kembalikan grid ke keadaan polos. Dipanggil dari banner, dan juga setelah
+  /// satu order selesai dibuat - pelanggan berikutnya harus melihat menu penuh,
+  /// bukan sisa saringan pelanggan sebelumnya.
+  void _clearFilters() {
+    _controller.clear();
+    ref.read(posQueryProvider.notifier).setQuery('');
+    ref.read(posCategoryProvider.notifier).select(null);
   }
 
   Widget _categoryChip({
@@ -407,19 +468,30 @@ class _VariationDialogState extends State<_VariationDialog> {
   @override
   void initState() {
     super.initState();
-    // Hanya pilihan **gratis** yang boleh terpilih sendiri. Dulu opsi pertama
-    // tiap jenis selalu dipakai sebagai default; kalau kebetulan itu topping
-    // berbayar, setiap porsi ikut ditagih topping yang tidak diminta siapa pun
-    // dan harga dasar menu jadi tidak pernah benar. Ini pernah terjadi.
-    widget.byType.forEach((type, options) {
-      for (final option in options) {
-        if (option.extraPrice == 0) {
-          _selected[type] = option;
-          break;
-        }
-      }
-    });
+    // Tidak ada yang dipilihkan otomatis untuk jenis WAJIB - kasir harus
+    // menentukannya sendiri. Dulu opsi gratis pertama dipakai sebagai default,
+    // dan itu berarti setiap Indomie diam-diam jadi rasa yang kebetulan
+    // terurut pertama.
+    //
+    // Jenis opsional (topping) tetap kosong seperti sebelumnya.
   }
+
+  /// Sebuah jenis variasi **wajib dipilih** kalau ada opsi yang tidak menambah
+  /// harga di dalamnya.
+  ///
+  /// Itu penanda paling jujur yang tersedia tanpa mengubah skema: grup yang
+  /// semua opsinya berbayar adalah tambahan (Extra Topping), sedangkan grup
+  /// yang punya pilihan dasar gratis adalah pilihan yang memang harus diambil
+  /// (Rasa, Porsi). Dapur tidak bisa memasak "Indomie tanpa rasa" - mereka
+  /// tidak tahu itu kari goreng atau soto.
+  static bool _isRequired(List<MenuVariation> options) =>
+      options.any((o) => o.extraPrice == 0);
+
+  /// Jenis wajib yang belum dipilih. Selama masih ada, tombol Tambah mati.
+  List<String> get _missing => widget.byType.entries
+      .where((e) => _isRequired(e.value) && !_selected.containsKey(e.key))
+      .map((e) => e.key)
+      .toList();
 
   int get _extra => _selected.values.fold(0, (sum, v) => sum + v.extraPrice);
 
@@ -444,24 +516,37 @@ class _VariationDialogState extends State<_VariationDialog> {
               for (final entry in widget.byType.entries) ...[
                 Padding(
                   padding: const EdgeInsets.only(top: 16, bottom: 8),
-                  child: Text(
-                    entry.key,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w800,
-                      fontSize: 15,
-                    ),
+                  child: Row(
+                    children: [
+                      Text(
+                        entry.key,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 15,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      if (_isRequired(entry.value))
+                        const StatusChip(label: 'wajib', color: AppTheme.unpaid)
+                      else
+                        const StatusChip(label: 'opsional', color: Colors.black45),
+                    ],
                   ),
                 ),
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
                   children: [
-                    // Selalu ada jalan keluar dari sebuah jenis variasi.
-                    OptionChip(
-                      label: _noneLabel(entry.key),
-                      selected: !_selected.containsKey(entry.key),
-                      onTap: () => setState(() => _selected.remove(entry.key)),
-                    ),
+                    // "Tanpa ..." hanya untuk jenis opsional. Menawarkannya
+                    // pada Rasa atau Porsi membuat pesanan sampai ke dapur
+                    // tanpa keterangan yang mereka butuhkan - dan itu persis
+                    // yang terjadi di warung.
+                    if (!_isRequired(entry.value))
+                      OptionChip(
+                        label: _noneLabel(entry.key),
+                        selected: !_selected.containsKey(entry.key),
+                        onTap: () => setState(() => _selected.remove(entry.key)),
+                      ),
                     for (final option in entry.value)
                       OptionChip(
                         label: option.label,
@@ -481,10 +566,12 @@ class _VariationDialogState extends State<_VariationDialog> {
       actions: [
         TextButton(onPressed: () => Navigator.pop(context), child: const Text('Batal')),
         FilledButton(
-          onPressed: () => Navigator.pop(context, _selected.values.toList()),
+          onPressed: _missing.isEmpty
+              ? () => Navigator.pop(context, _selected.values.toList())
+              : null,
           child: Text(
-            _extra == 0
-                ? 'Tambah · ${Fmt.rupiah(widget.item.price)}'
+            _missing.isNotEmpty
+                ? 'Pilih ${_missing.first} dulu'
                 : 'Tambah · ${Fmt.rupiah(widget.item.price + _extra)}',
           ),
         ),

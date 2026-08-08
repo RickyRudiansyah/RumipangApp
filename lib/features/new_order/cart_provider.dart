@@ -6,6 +6,7 @@ import '../../models/catalog.dart';
 import '../../models/enums.dart';
 import '../../models/order.dart';
 import '../orders/orders_provider.dart';
+import 'catalog_provider.dart';
 
 /// Satu baris keranjang. Item yang sama dengan variasi berbeda dihitung
 /// sebagai baris berbeda.
@@ -167,6 +168,13 @@ class CartNotifier extends Notifier<CartState> {
 
     final order = await ref.read(orderRepositoryProvider).create(payload);
     clear();
+
+    // Saringan menu ikut dibersihkan. Kalau tidak, sisa pencarian pelanggan
+    // sebelumnya menempel ke pelanggan berikutnya - dan kasir yang sedang
+    // buru-buru menyimpulkan menunya hilang, lalu menutup paksa aplikasi.
+    ref.read(posQueryProvider.notifier).setQuery('');
+    ref.read(posCategoryProvider.notifier).select(null);
+
     await ref.read(cashierBoardProvider.notifier).refresh();
     return order;
   }

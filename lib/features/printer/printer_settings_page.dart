@@ -91,6 +91,29 @@ class _PrinterSettingsPageState extends ConsumerState<PrinterSettingsPage> {
           _stationCard(station),
           const SizedBox(height: 12),
         ],
+
+        // Pertanyaan pertama yang muncul begitu ada dua kartu: "kenapa yang satu
+        // selalu terputus?" Dijawab di sini, bukan lewat dugaan.
+        if (ref.watch(printerControllerProvider).configured.length > 1)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: AppTheme.panel(background: AppTheme.queued.withValues(alpha: 0.06)),
+            child: const Row(
+              children: [
+                Icon(Icons.info_outline, size: 18, color: AppTheme.queued),
+                SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Tablet hanya bisa memegang satu printer sekaligus. Saat '
+                    'mencetak, aplikasi berpindah sendiri — jadi normal kalau '
+                    'yang satu "menunggu giliran". Tidak perlu ditekan '
+                    'Hubungkan.',
+                    style: TextStyle(fontSize: 12, height: 1.4),
+                  ),
+                ),
+              ],
+            ),
+          ),
         const SizedBox(height: 16),
 
         // --- ringkasan antrian ---
@@ -149,11 +172,19 @@ class _PrinterSettingsPageState extends ConsumerState<PrinterSettingsPage> {
     final slot = printer.slot(station);
     final active = printer.activeStation == station;
 
+    // Printer yang sudah dipilih tapi tidak sedang memegang socket BUKAN
+    // kerusakan - ia hanya sedang menunggu giliran. Menampilkannya merah
+    // "Terputus" membuat kasir menekan Hubungkan berulang kali mengejar dua
+    // lampu hijau yang memang tidak akan pernah menyala bersamaan.
+    final waitingTurn = slot.isSelected &&
+        slot.link == PrinterLinkState.disconnected &&
+        slot.message == null;
+
     final color = switch (slot.link) {
       PrinterLinkState.connected => AppTheme.paid,
       PrinterLinkState.notSelected => Colors.black45,
       PrinterLinkState.connecting => AppTheme.warn,
-      _ => AppTheme.unpaid,
+      _ => waitingTurn ? Colors.black54 : AppTheme.unpaid,
     };
 
     return Container(
@@ -189,7 +220,7 @@ class _PrinterSettingsPageState extends ConsumerState<PrinterSettingsPage> {
           ),
           const SizedBox(height: 2),
           Text(
-            slot.label,
+            waitingTurn ? 'Siap · menunggu giliran' : slot.label,
             style: TextStyle(color: color, fontSize: 13, fontWeight: FontWeight.w700),
           ),
           if (slot.message != null) ...[

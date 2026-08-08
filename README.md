@@ -115,17 +115,34 @@ pernah terjadi.
 3. Salin:
    ```powershell
    Copy-Item "RumipangApp\build\app\outputs\flutter-apk\app-release.apk" `
-             "RumipangKasir-v1.1.0.apk"
+             "RumipangKasir-v1.6.0.apk"
    ```
 
 Memastikan sebuah APK benar-benar berisi perubahan, tanpa memasangnya —
 teks UI Dart ikut tertanam di `libapp.so`:
 
 ```bash
-unzip -p RumipangKasir-v1.1.0.apk lib/arm64-v8a/libapp.so | grep -a -c "Harga dasar"
+unzip -p RumipangKasir-v1.6.0.apk lib/arm64-v8a/libapp.so | grep -a -c "QRIS Lunas"
 ```
 
 `0` berarti APK itu build lama.
+
+> **Cari teks ASCII murni.** Karakter seperti `·` tidak tersimpan sebagai UTF-8
+> polos di `libapp.so`, jadi mencari `"Selesai · Pindahkan"` selalu menjawab
+> `0` walau kodenya jelas ada. Sudah pernah menyesatkan diagnosis.
+
+### Riwayat versi
+
+| Versi | Isi |
+|---|---|
+| 1.0.0 | Rilis awal |
+| 1.1.0 | Warna opsi variasi (`OptionChip`), "Tanpa topping", cari + filter + muat ulang di POS, jatah karyawan tanpa HPP, hapus riwayat per periode, Take Away |
+| 1.2.0 | Tombol "Selesai" kembali untuk order **tunai** (QRIS tetap otomatis) |
+| 1.3.0 | Dua printer: stasiun Kasir & Dapur |
+| 1.3.1 | **Perbaikan:** pemilih printer selalu kosong kalau ditekan saat pemindaian awal masih jalan |
+| 1.4.0 | "Selesai" **per order** (bukan per meja), section **QRIS Lunas** |
+| 1.5.0 | Riwayat: filter 1/7/30 hari + omzet · HPP hanya owner |
+| 1.6.0 | Penyapu pembayaran QRIS yang tertinggal (~2 menit sekali) |
 
 ---
 
@@ -146,7 +163,7 @@ lib/
 ├── data/                        # repository per domain
 ├── features/
 │   ├── auth/                    # login + guard role staff
-│   ├── orders/                  # board kasir + antrian aksi offline
+│   ├── orders/                  # board kasir, QRIS Lunas, antrian aksi offline
 │   ├── new_order/               # POS manual
 │   ├── history/                 # riwayat + cetak ulang
 │   ├── admin/                   # menu & HPP: kategori, harga, margin, foto
@@ -244,9 +261,10 @@ Lima layar tambahan, semuanya butuh endpoint di
 
 | Layar | Isi |
 |---|---|
+| **Kasir** | Board per meja berisi **pekerjaan yang belum selesai** — praktisnya order tunai. Tombol **"Selesai" ada di tiap kartu order, bukan per meja**: satu meja bisa memesan beberapa kali semalam, dan menutup semuanya sekaligus ikut menelan order yang baru masuk. Baris **"QRIS Lunas"** di panel meja menampilkan order QRIS hari ini (jumlah + total) — **hanya-baca**, karena ordernya sudah lunas dan sudah di riwayat. |
 | **Menu** | **HPP, margin, dan laba hanya terlihat oleh owner** (`canSeeCostProvider`) — kolomnya, chip-nya, peringatan "HPP belum diisi", judul layar, kolom input di dialog, sampai angka laba per menu di Laporan. Kasir melihat layar yang sama tanpa satu pun angka modal. Ini penjagaan **tampilan**, bukan keamanan: `cost_price` tetap ikut di respons `/api/menu`. Dikelompokkan per kategori. Tambah menu, kategori, dan topping/variasi berharga. Ubah harga, isi HPP, margin otomatis, foto menu (ambil → potong/putar → unggah). Menu yang dijual di bawah modal ditandai merah. |
 | **Stok** | Bahan baku + alert saat menyentuh ambang (default 20, bisa beda per bahan). Perubahan stok lewat "Sesuaikan" beserta alasannya, tidak pernah menimpa angka langsung. |
-| **Laporan** | Menu terlaris & kurang laku, omzet, total HPP, laba kotor. Rentang hari ini / 7 hari / 30 hari. |
+| **Laporan** | Menu terlaris & kurang laku, omzet, dan — **khusus owner** — total HPP + laba kotor. Rentang hari ini / 7 hari / 30 hari. Jumlah kartunya berubah mengikuti peran, jadi tata letaknya **tidak boleh** memakai indeks tetap (`summaries[3]`) — itu crash begitu kartunya berkurang. |
 | **Jatah** | Jatah makan karyawan: **satu menu per orang per hari, bebas menu apa pun**. Menunya wajib dipilih (ada kolom cari), dan HPP tidak ditampilkan di layar ini — "HPP belum diisi" di sebelah nama menu membuatnya terbaca seperti menu bermasalah yang tidak boleh diambil. **Owner** bisa menambah karyawan dan mengubah namanya; kasir tidak melihat tombol itu. |
 | **Tema** | Tema event (Normal, Natal, Ramadan, Kemerdekaan, Imlek). Berlaku untuk aplikasi **dan** web. |
 | **Printer** | **Dua stasiun: Kasir & Dapur**, masing-masing printer sendiri, struknya sama persis. Satu order = satu job per stasiun (kolom `print_jobs.station` di server). Tiap kartu punya tombol Hubungkan · Tes Cetak · Ganti · Lupakan. |
@@ -343,10 +361,19 @@ Semuanya sudah diterapkan; ini catatan supaya tidak tidak sengaja dirusak nanti.
    sekarang akan membuat angka bulan lalu bergerak sendiri setiap harga modal
    diperbarui.
 
-9. **Perubahan stok lewat `delta`, bukan menimpa `stock_qty`.** Dua orang yang
+9. **Loop cetak juga menyapu pembayaran QRIS yang tertinggal.** Tiap ~2 menit
+   `print_queue.dart` memanggil `POST /api/payments/reconcile`. Terlihat tidak
+   nyambung dengan mencetak, dan memang - tapi loop itulah satu-satunya yang
+   benar-benar berjalan sepanjang hari (foreground service, tablet selalu
+   menyala di kasir). Server tidak punya penjadwal, dan webhook Midtrans
+   terbukti bisa tidak sampai: pernah dua pelanggan membayar Rp 107.000 dan
+   ordernya tidak pernah dibuat. **Jangan hapus pemanggilan itu hanya karena ia
+   tidak ada urusannya dengan printer.**
+
+10. **Perubahan stok lewat `delta`, bukan menimpa `stock_qty`.** Dua orang yang
    menyesuaikan stok bersamaan dengan PATCH akan saling menghapus.
 
-10. **Katalog tidak menyegarkan dirinya sendiri.** `menuProvider`,
+11. **Katalog tidak menyegarkan dirinya sendiri.** `menuProvider`,
     `menuVariationsProvider`, `menuCategoriesProvider`, dan `tablesProvider`
     adalah `FutureProvider` yang menyimpan hasil pertamanya — menu yang
     ditambahkan dari dashboard web (atau dari tablet lain) tidak akan pernah
@@ -386,6 +413,19 @@ Satu socket SPP dipakai bergantian, jadi yang perlu diuji justru **perpindahanny
 - [ ] Aplikasi ditutup paksa tepat saat berpindah printer → setelah dibuka lagi,
       job yang belum di-ACK tercetak **sekali**, bukan dua kali
 - [ ] Layar Printer: hanya **satu** kartu bertanda "memegang koneksi"
+
+### Khusus pembayaran QRIS
+
+Yang diuji di sini bukan jalur normalnya, tapi **jalur gagalnya** — di situlah
+uang pernah hilang:
+
+- [ ] Bayar QRIS lalu **tutup tab** sebelum kembali ke aplikasi → ordernya tetap
+      muncul (paling lama ~2 menit, lewat penyapu di app)
+- [ ] Bayar QRIS lalu **matikan data HP** tepat setelah bayar → sama, tetap masuk
+- [ ] Order QRIS **tidak** muncul di board kasir, tapi ada di "QRIS Lunas" dan
+      Riwayat, dan ikut terhitung di omzet
+- [ ] Setelah bayar, pelanggan **tidak** terlempar ke halaman kosong
+      (`NEXT_PUBLIC_APP_URL` sudah domain publik)
 
 ---
 

@@ -39,6 +39,17 @@ class OrderRepository {
   Future<List<OrderModel>> history() async =>
       _parseList(await _api.get('/api/orders/history'));
 
+  /// Order QRIS yang sudah lunas sejak [since] - hanya untuk dilihat.
+  ///
+  /// QRIS diarsipkan server begitu pembayarannya settle, jadi ia tidak pernah
+  /// muncul di board kasir. Warung tetap perlu memantaunya; inilah daftarnya.
+  /// Batas harinya dihitung dari jam tablet (WIB), bukan UTC.
+  Future<List<OrderModel>> qrisPaid({required DateTime since}) async =>
+      _parseList(await _api.get('/api/orders', query: {
+        'mode': 'qris-paid',
+        'from': since.toUtc().toIso8601String(),
+      }));
+
   /// Hapus riwayat. Tanpa rentang berarti **seluruh** riwayat.
   ///
   /// [from] inklusif, [to] eksklusif, dan keduanya dikirim setelah dikonversi

@@ -11,6 +11,7 @@ import '../../shared/format.dart';
 import '../../shared/layout.dart';
 import '../../shared/theme.dart';
 import '../../shared/widgets.dart';
+import '../auth/staff_provider.dart';
 import '../new_order/catalog_provider.dart';
 
 /// Menu & HPP: tambah menu, ubah harga, isi HPP, lihat margin.
@@ -84,26 +85,29 @@ class MenuAdminPage extends ConsumerWidget {
       error.toString().replaceFirst('Exception: ', '');
 }
 
-class _Header extends StatelessWidget {
+class _Header extends ConsumerWidget {
   const _Header({required this.onAdd, required this.onAddCategory});
 
   final VoidCallback onAdd;
   final VoidCallback onAddCategory;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final compact = context.isCompact;
+    final showCost = ref.watch(canSeeCostProvider);
 
+    // Judul pun tidak menyebut HPP untuk kasir - percuma menyembunyikan
+    // kolomnya kalau namanya masih terpampang di kepala layar.
     final title = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          'Menu & HPP',
-          style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+        Text(
+          showCost ? 'Menu & HPP' : 'Menu',
+          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
         ),
         const SizedBox(height: 2),
         Text(
-          compact
+          compact || !showCost
               ? 'Dikelompokkan per kategori.'
               : 'Dikelompokkan per kategori. HPP diisi manual, margin dihitung otomatis.',
           style: const TextStyle(color: Colors.black54, fontSize: 13),
@@ -155,7 +159,7 @@ class _Header extends StatelessWidget {
   }
 }
 
-class _MenuTable extends StatelessWidget {
+class _MenuTable extends ConsumerWidget {
   const _MenuTable({
     required this.items,
     required this.groups,
@@ -170,12 +174,15 @@ class _MenuTable extends StatelessWidget {
   final void Function(MenuItemModel) onEdit;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    // Peringatan "HPP belum diisi" ikut disembunyikan dari kasir - itu tugas
+    // owner, dan menyebutnya membocorkan bahwa ada angka modal di balik layar.
+    final showCost = ref.watch(canSeeCostProvider);
     final withoutCost = items.where((e) => !e.hasCost).length;
 
     return Column(
       children: [
-        if (withoutCost > 0)
+        if (showCost && withoutCost > 0)
           Material(
             color: AppTheme.warn.withValues(alpha: 0.12),
             child: Padding(
@@ -269,11 +276,12 @@ class _CategorySection extends StatelessWidget {
   }
 }
 
-class _TableHead extends StatelessWidget {
+class _TableHead extends ConsumerWidget {
   const _TableHead();
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final showCost = ref.watch(canSeeCostProvider);
     const style = TextStyle(
       fontSize: 12,
       fontWeight: FontWeight.w700,
@@ -282,31 +290,36 @@ class _TableHead extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
       child: Row(
-        children: const [
-          SizedBox(width: 56),
+        children: [
+          const SizedBox(width: 56),
           Expanded(flex: 4, child: Text('MENU', style: style)),
           Expanded(flex: 2, child: Text('HARGA JUAL', style: style, textAlign: TextAlign.right)),
-          Expanded(flex: 2, child: Text('HPP', style: style, textAlign: TextAlign.right)),
-          Expanded(flex: 2, child: Text('MARGIN', style: style, textAlign: TextAlign.right)),
+          // HPP & margin hanya untuk owner (auth/staff_provider.dart).
+          if (showCost) ...[
+            Expanded(flex: 2, child: Text('HPP', style: style, textAlign: TextAlign.right)),
+            Expanded(flex: 2, child: Text('MARGIN', style: style, textAlign: TextAlign.right)),
+          ],
           SizedBox(width: 90, child: Text('STATUS', style: style, textAlign: TextAlign.center)),
-          SizedBox(width: 48),
+          const SizedBox(width: 48),
         ],
       ),
     );
   }
 }
 
-class _MenuRow extends StatelessWidget {
+class _MenuRow extends ConsumerWidget {
   const _MenuRow({required this.item, required this.onEdit});
 
   final MenuItemModel item;
   final void Function(MenuItemModel) onEdit;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final percent = item.marginPercent;
+    // HPP & margin hanya untuk owner (auth/staff_provider.dart).
+    final showCost = ref.watch(canSeeCostProvider);
 
-    if (context.isCompact) return _compact(context, percent);
+    if (context.isCompact) return _compact(context, percent, showCost);
 
     return InkWell(
       onTap: () => onEdit(item),
@@ -358,6 +371,7 @@ class _MenuRow extends StatelessWidget {
                 style: const TextStyle(fontWeight: FontWeight.w600),
               ),
             ),
+            if (showCost) ...[
             Expanded(
               flex: 2,
               child: Text(
@@ -393,6 +407,7 @@ class _MenuRow extends StatelessWidget {
                 ],
               ),
             ),
+            ],
             SizedBox(
               width: 90,
               child: Center(child: _statusChip()),
@@ -409,7 +424,7 @@ class _MenuRow extends StatelessWidget {
 
   /// Versi HP: dua baris, bukan enam kolom. Harga dan margin tetap terlihat
   /// karena itu yang dicari owner; sisanya turun ke baris kedua.
-  Widget _compact(BuildContext context, double? percent) {
+  Widget _compact(BuildContext context, double? percent, bool showCost) {
     return InkWell(
       onTap: () => onEdit(item),
       child: Padding(
@@ -466,23 +481,26 @@ class _MenuRow extends StatelessWidget {
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
                       _statusChip(),
-                      if (item.hasCost)
-                        StatusChip(
-                          label: 'HPP ${Fmt.rupiah(item.costPrice)}',
-                          color: Colors.black54,
-                        )
-                      else
-                        const StatusChip(
-                          label: 'HPP belum diisi',
-                          color: AppTheme.warn,
-                        ),
-                      if (item.hasCost)
-                        StatusChip(
-                          label: percent == null
-                              ? Fmt.rupiah(item.margin)
-                              : '${Fmt.rupiah(item.margin)} · ${percent.toStringAsFixed(0)}%',
-                          color: item.isLossMaking ? AppTheme.unpaid : AppTheme.paid,
-                        ),
+                      // HPP & margin hanya untuk owner.
+                      if (showCost) ...[
+                        if (item.hasCost)
+                          StatusChip(
+                            label: 'HPP ${Fmt.rupiah(item.costPrice)}',
+                            color: Colors.black54,
+                          )
+                        else
+                          const StatusChip(
+                            label: 'HPP belum diisi',
+                            color: AppTheme.warn,
+                          ),
+                        if (item.hasCost)
+                          StatusChip(
+                            label: percent == null
+                                ? Fmt.rupiah(item.margin)
+                                : '${Fmt.rupiah(item.margin)} · ${percent.toStringAsFixed(0)}%',
+                            color: item.isLossMaking ? AppTheme.unpaid : AppTheme.paid,
+                          ),
+                      ],
                     ],
                   ),
                 ],
@@ -1205,6 +1223,7 @@ class _MenuEditorDialogState extends ConsumerState<_MenuEditorDialog> {
   Widget build(BuildContext context) {
     final margin = _priceValue - _costValue;
     final showMargin = _costValue > 0 && _priceValue > 0;
+    final showCost = ref.watch(canSeeCostProvider);
 
     return AlertDialog(
       title: Text(_isNew ? 'Tambah Menu' : 'Ubah Menu'),
@@ -1247,23 +1266,29 @@ class _MenuEditorDialogState extends ConsumerState<_MenuEditorDialog> {
                       ),
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: TextField(
-                      controller: _cost,
-                      keyboardType: TextInputType.number,
-                      onChanged: (_) => setState(() {}),
-                      decoration: const InputDecoration(
-                        labelText: 'HPP (modal)',
-                        prefixText: 'Rp ',
-                        helperText: 'boleh dikosongkan',
+                  // Kolom modal hanya untuk owner. Nilainya tetap dikirim apa
+                  // adanya saat kasir menyimpan (controller-nya diisi dari data
+                  // yang ada), jadi HPP yang sudah diisi owner tidak terhapus
+                  // hanya karena menu disunting kasir.
+                  if (showCost) ...[
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: TextField(
+                        controller: _cost,
+                        keyboardType: TextInputType.number,
+                        onChanged: (_) => setState(() {}),
+                        decoration: const InputDecoration(
+                          labelText: 'HPP (modal)',
+                          prefixText: 'Rp ',
+                          helperText: 'boleh dikosongkan',
+                        ),
                       ),
                     ),
-                  ),
+                  ],
                 ],
               ),
               const SizedBox(height: 12),
-              if (showMargin)
+              if (showCost && showMargin)
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),

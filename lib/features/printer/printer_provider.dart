@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/failure.dart';
 import '../../core/providers.dart';
+import '../../models/enums.dart';
 import 'printer_service.dart';
 
 final printerServiceProvider = Provider<PrinterService>((ref) => PrinterService());
@@ -9,134 +10,227 @@ final printerServiceProvider = Provider<PrinterService>((ref) => PrinterService(
 /// Koneksi ke printer: pilih perangkat, sambung, tes cetak.
 ///
 /// MAC printer disimpan lokal supaya kasir tidak perlu memilih ulang tiap pagi
-/// (SPEC §8.5).
+/// (SPEC §8.5). Sejak ada printer dapur, disimpan **satu per stasiun**.
+///
+/// Socket SPP-nya tetap satu. Yang berubah bukan jumlah koneksi, melainkan
+/// siapa yang sedang memegangnya - lihat [useStation].
 class PrinterController extends Notifier<PrinterStatus> {
   PrinterService get _service => ref.read(printerServiceProvider);
 
   @override
   PrinterStatus build() {
     final store = ref.read(localStoreProvider);
-    final mac = store.printerMac;
     return PrinterStatus(
-      link: mac == null ? PrinterLinkState.notSelected : PrinterLinkState.disconnected,
-      deviceMac: mac,
-      deviceName: store.printerName,
+      slots: {
+        for (final station in PrintStation.values)
+          station: () {
+            final mac = store.printerMac(station);
+            return PrinterSlot(
+              link: mac == null
+                  ? PrinterLinkState.notSelected
+                  : PrinterLinkState.disconnected,
+              deviceMac: mac,
+              deviceName: store.printerName(station),
+            );
+          }(),
+      },
     );
   }
 
-  Future<List<PairedPrinter>> listDevices() async {
+  void _setSlot(PrintStation station, PrinterSlot slot) {
+    state = state.withSlot(station, slot);
+  }
+
+  // ------------------------------------------------------------- memilih ----
+
+  Future<List<PairedPrinter>> listDevices(PrintStation station) async {
     if (!await _service.ensurePermissions()) {
-      state = state.copyWith(
-        link: PrinterLinkState.permissionDenied,
-        message: 'Izin Bluetooth ditolak. Buka Pengaturan > Aplikasi > '
-            'Rumipang Kasir > Izin, lalu aktifkan "Perangkat di sekitar".',
+      _setSlot(
+        station,
+        state.slot(station).copyWith(
+              link: PrinterLinkState.permissionDenied,
+              message: 'Izin Bluetooth ditolak. Buka Pengaturan > Aplikasi > '
+                  'Rumipang Kasir > Izin, lalu aktifkan "Perangkat di sekitar".',
+            ),
       );
       return const [];
     }
     if (!await _service.bluetoothEnabled) {
-      state = state.copyWith(
-        link: PrinterLinkState.bluetoothOff,
-        message: 'Bluetooth tablet sedang mati.',
+      _setSlot(
+        station,
+        state.slot(station).copyWith(
+              link: PrinterLinkState.bluetoothOff,
+              message: 'Bluetooth tablet sedang mati.',
+            ),
       );
       return const [];
     }
     try {
       return await _service.pairedPrinters();
     } catch (e) {
-      state = state.copyWith(message: 'Gagal membaca daftar perangkat: $e');
+      _setSlot(station, state.slot(station).copyWith(message: 'Gagal membaca daftar perangkat: $e'));
       return const [];
     }
   }
 
-  Future<void> select(PairedPrinter printer) async {
+  Future<void> select(PrintStation station, PairedPrinter printer) async {
+    // Satu printer fisik tidak boleh memegang dua stasiun: strukya akan keluar
+    // dua kali di kertas yang sama, dan kasir mengira sistemnya rusak.
+    for (final other in PrintStation.values) {
+      if (other == station) continue;
+      if (state.slot(other).deviceMac == printer.mac) {
+        throw PrinterFailure(
+          '${printer.name} sudah dipakai sebagai printer ${other.label}. '
+          'Pilih printer lain, atau lepaskan dulu dari stasiun itu.',
+        );
+      }
+    }
+
     await ref.read(localStoreProvider).savePrinter(
+          station,
           mac: printer.mac,
           name: printer.name,
         );
-    state = PrinterStatus(
-      link: PrinterLinkState.disconnected,
-      deviceMac: printer.mac,
-      deviceName: printer.name,
+    _setSlot(
+      station,
+      PrinterSlot(
+        link: PrinterLinkState.disconnected,
+        deviceMac: printer.mac,
+        deviceName: printer.name,
+      ),
     );
-    await connect();
+    await useStation(station);
   }
 
-  Future<void> forget() async {
-    await _service.disconnect();
-    await ref.read(localStoreProvider).clearPrinter();
-    state = const PrinterStatus(link: PrinterLinkState.notSelected);
-  }
-
-  /// Sambungkan ke printer yang tersimpan. Mengembalikan `true` kalau siap
-  /// menerima byte.
-  Future<bool> connect() async {
-    final mac = state.deviceMac;
-    if (mac == null) {
-      state = state.copyWith(link: PrinterLinkState.notSelected);
-      return false;
+  Future<void> forget(PrintStation station) async {
+    if (state.activeStation == station) {
+      await _service.disconnect();
+      state = state.copyWith(clearActive: true);
     }
-    if (state.isBusy) return false;
+    await ref.read(localStoreProvider).clearPrinter(station);
+    _setSlot(station, PrinterSlot.empty);
+  }
 
-    state = state.copyWith(link: PrinterLinkState.connecting, clearMessage: true);
+  // ---------------------------------------------------------- menyambung ----
+
+  /// Jadikan [station] pemegang socket, sambungkan kalau perlu.
+  ///
+  /// Mengembalikan `true` kalau printer stasiun itu siap menerima byte.
+  /// **Inilah satu-satunya pintu untuk berpindah printer** - jangan pernah
+  /// memanggil `PrinterService.connect` langsung dari luar, karena status
+  /// slot lain harus ikut diturunkan jadi `disconnected`.
+  Future<bool> useStation(PrintStation station) async {
+    final slot = state.slot(station);
+    final mac = slot.deviceMac;
+    if (mac == null) return false;
+
+    // Sudah pegang socket dan socketnya masih hidup.
+    if (state.activeStation == station &&
+        _service.connectedMac == mac &&
+        await _service.isConnected) {
+      if (!slot.isConnected) {
+        _setSlot(station, slot.copyWith(link: PrinterLinkState.connected, clearMessage: true));
+      }
+      return true;
+    }
+
+    _setSlot(station, slot.copyWith(link: PrinterLinkState.connecting, clearMessage: true));
+
     try {
       if (!await _service.ensurePermissions()) {
-        state = state.copyWith(
-          link: PrinterLinkState.permissionDenied,
-          message: 'Izin Bluetooth belum diberikan.',
+        _setSlot(
+          station,
+          state.slot(station).copyWith(
+                link: PrinterLinkState.permissionDenied,
+                message: 'Izin Bluetooth belum diberikan.',
+              ),
         );
         return false;
       }
       if (!await _service.bluetoothEnabled) {
-        state = state.copyWith(
-          link: PrinterLinkState.bluetoothOff,
-          message: 'Nyalakan Bluetooth tablet.',
+        _setSlot(
+          station,
+          state.slot(station).copyWith(
+                link: PrinterLinkState.bluetoothOff,
+                message: 'Nyalakan Bluetooth tablet.',
+              ),
         );
         return false;
       }
 
       await _service.connect(mac);
-      state = state.copyWith(link: PrinterLinkState.connected, clearMessage: true);
+
+      // Stasiun lain otomatis kehilangan socketnya - catat, supaya layar tidak
+      // menampilkan dua printer "Terhubung" padahal cuma satu yang benar.
+      var next = state;
+      for (final other in PrintStation.values) {
+        if (other == station) continue;
+        final s = next.slot(other);
+        if (s.isSelected && s.link == PrinterLinkState.connected) {
+          next = next.withSlot(other, s.copyWith(link: PrinterLinkState.disconnected));
+        }
+      }
+      next = next.withSlot(
+        station,
+        next.slot(station).copyWith(link: PrinterLinkState.connected, clearMessage: true),
+      );
+      state = next.copyWith(activeStation: station);
       return true;
     } on PrinterFailure catch (e) {
-      state = state.copyWith(link: PrinterLinkState.disconnected, message: e.message);
+      _setSlot(
+        station,
+        state.slot(station).copyWith(link: PrinterLinkState.disconnected, message: e.message),
+      );
       return false;
     } catch (e) {
-      state = state.copyWith(
-        link: PrinterLinkState.disconnected,
-        message: 'Gagal menyambung: $e',
+      _setSlot(
+        station,
+        state.slot(station).copyWith(
+              link: PrinterLinkState.disconnected,
+              message: 'Gagal menyambung: $e',
+            ),
       );
       return false;
     }
   }
 
-  Future<void> disconnect() async {
-    await _service.disconnect();
-    state = state.copyWith(link: PrinterLinkState.disconnected, clearMessage: true);
+  /// Sambungkan printer pertama yang tersedia - dipakai saat aplikasi mulai,
+  /// supaya indikator tidak merah sampai struk pertama datang.
+  Future<void> connect() async {
+    final configured = state.configured;
+    if (configured.isEmpty) return;
+    await useStation(configured.first);
   }
 
-  /// Dipakai loop antrian sebelum mengklaim job: pastikan printer benar-benar
-  /// tersambung, sambungkan ulang diam-diam kalau perlu.
-  Future<bool> ensureReady() async {
-    if (state.deviceMac == null) return false;
-    if (await _service.isConnected) {
-      if (!state.isConnected) {
-        state = state.copyWith(link: PrinterLinkState.connected, clearMessage: true);
+  Future<void> disconnect() async {
+    await _service.disconnect();
+    var next = state;
+    for (final station in PrintStation.values) {
+      final s = next.slot(station);
+      if (s.isSelected) {
+        next = next.withSlot(station, s.copyWith(link: PrinterLinkState.disconnected));
       }
-      return true;
     }
-    if (state.isConnected) {
-      // Socket putus tanpa pemberitahuan (printer dimatikan, keluar jangkauan).
-      state = state.copyWith(link: PrinterLinkState.disconnected);
-    }
-    return connect();
+    state = next.copyWith(clearActive: true);
+  }
+
+  /// Dipakai saat aplikasi kembali ke depan: pastikan socketnya masih hidup.
+  Future<bool> ensureReady() async {
+    final active = state.activeStation;
+    if (active != null) return useStation(active);
+    final configured = state.configured;
+    if (configured.isEmpty) return false;
+    return useStation(configured.first);
   }
 
   /// Struk contoh - tidak menyentuh antrian server sama sekali.
-  Future<void> testPrint() async {
-    if (!await ensureReady()) {
-      throw PrinterFailure(state.message ?? 'Printer tidak terhubung');
+  Future<void> testPrint(PrintStation station) async {
+    if (!await useStation(station)) {
+      throw PrinterFailure(state.slot(station).message ?? 'Printer tidak terhubung');
     }
-    await _service.printTestPage(state.deviceName ?? 'Printer');
+    await _service.printTestPage(
+      '${state.slot(station).deviceName ?? 'Printer'} (${station.label})',
+    );
   }
 }
 

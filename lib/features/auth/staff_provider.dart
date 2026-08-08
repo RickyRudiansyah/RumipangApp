@@ -112,6 +112,19 @@ class StaffNotifier extends AsyncNotifier<StaffIdentity?> {
   }
 }
 
+/// Boleh melihat angka modal: HPP, margin, dan laba.
+///
+/// **Hanya owner.** Permintaan pemilik warung: *"hpp gw cmn mau owner aja yg
+/// tau"* — HPP menempel pada harga bahan dan margin tiap menu, dan itu bukan
+/// informasi yang ingin ia bagi ke karyawan yang memegang tablet yang sama.
+///
+/// Ini penjagaan **tampilan**, bukan keamanan: `cost_price` tetap ikut di
+/// respons `/api/menu` yang bisa dibaca siapa pun yang punya token staff.
+/// Menyembunyikannya betul-betul menuntut endpoint terpisah per peran.
+final canSeeCostProvider = Provider<bool>((ref) {
+  return ref.watch(staffProvider).value?.isOwner ?? false;
+});
+
 final staffProvider =
     AsyncNotifierProvider<StaffNotifier, StaffIdentity?>(StaffNotifier.new);
 

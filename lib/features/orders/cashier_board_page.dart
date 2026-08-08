@@ -13,6 +13,7 @@ import '../auth/staff_provider.dart';
 import '../printer/print_queue.dart';
 import 'orders_provider.dart';
 import 'pending_actions.dart';
+import 'qris_paid_page.dart';
 
 /// Meja yang sedang dibuka di panel kanan. `null` = ikut meja pertama.
 class SelectedTableNotifier extends Notifier<String?> {
@@ -261,6 +262,12 @@ class _TableList extends ConsumerWidget {
             },
           ),
         ),
+        const Divider(height: 1),
+        // Board ini hanya berisi pekerjaan yang belum selesai - praktisnya
+        // order tunai. QRIS lunas sebelum ordernya lahir dan langsung masuk
+        // riwayat, jadi ia butuh pintunya sendiri supaya warung tidak
+        // kehilangan pandangan atas pesanan yang justru sudah dibayar.
+        const QrisPaidTile(),
         const Padding(
           padding: EdgeInsets.fromLTRB(16, 0, 16, 14),
           child: Row(
@@ -325,115 +332,8 @@ class _TableDetail extends ConsumerWidget {
             ),
           ),
         ),
-        _ArchiveBar(group: group),
       ],
     );
-  }
-}
-
-/// Tombol "Selesai" untuk order **tunai**.
-///
-/// Order QRIS tidak pernah sampai ke sini: uangnya sudah masuk sebelum ordernya
-/// lahir, jadi server mengarsipkannya sendiri begitu pembayarannya settle
-/// (lib/archive.ts di web). Yang tunai ditutup manual - masih ada uang dihitung
-/// dan kembalian diberikan, dan hanya kasir yang tahu kapan itu selesai.
-class _ArchiveBar extends ConsumerStatefulWidget {
-  const _ArchiveBar({required this.group});
-
-  final TableGroup group;
-
-  @override
-  ConsumerState<_ArchiveBar> createState() => _ArchiveBarState();
-}
-
-class _ArchiveBarState extends ConsumerState<_ArchiveBar> {
-  bool _busy = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final group = widget.group;
-
-    // "Selesai" hanya boleh muncul kalau SEMUA order di meja ini SERVED + PAID.
-    final blocked = !group.canArchive;
-
-    final hint = Text(
-      blocked
-          ? 'Meja bisa diselesaikan setelah semua order diantar dan lunas.'
-          : 'Semua order sudah diantar dan lunas.',
-      style: TextStyle(
-        fontSize: 13,
-        color: blocked ? Colors.black54 : AppTheme.paid,
-        fontWeight: blocked ? FontWeight.normal : FontWeight.w600,
-      ),
-    );
-
-    Widget button({required bool long}) => FilledButton.icon(
-          onPressed: blocked || _busy ? null : _archive,
-          icon: _busy
-              ? const SizedBox(
-                  height: 18,
-                  width: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                )
-              : const Icon(Icons.done_all),
-          label: Text(long ? 'Selesai · Pindahkan ke History' : 'Selesai'),
-        );
-
-    return Container(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border(top: BorderSide(color: AppTheme.border)),
-      ),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          // Tombol berlabel panjang memakan hampir seluruh lebar di panel
-          // sempit, menyisakan beberapa piksel untuk teks - hasilnya pecah
-          // satu huruf per baris.
-          if (constraints.maxWidth < SplitLayout.textWithAction) {
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                hint,
-                const SizedBox(height: 10),
-                button(long: false),
-              ],
-            );
-          }
-
-          return Row(
-            children: [
-              Expanded(child: hint),
-              const SizedBox(width: 16),
-              button(long: true),
-            ],
-          );
-        },
-      ),
-    );
-  }
-
-  Future<void> _archive() async {
-    final ok = await confirmDialog(
-      context,
-      title: 'Selesaikan ${widget.group.label}?',
-      message: '${widget.group.orders.length} order akan dipindahkan ke riwayat.',
-      confirmLabel: 'Selesaikan',
-    );
-    if (!ok || !mounted) return;
-
-    setState(() => _busy = true);
-    try {
-      await ref.read(cashierBoardProvider.notifier).archiveGroup(widget.group);
-      if (mounted) {
-        ref.read(selectedTableProvider.notifier).select(null);
-        showSnack(context, '${widget.group.label} dipindahkan ke riwayat');
-      }
-    } on AppFailure catch (e) {
-      if (mounted) showSnack(context, e.message, error: true);
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
   }
 }
 
@@ -561,6 +461,27 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
             ],
           ),
 
+          // "Selesai" pindah ke kartu order, bukan bilah per meja: satu meja
+          // bisa memesan beberapa kali, dan menutup semuanya sekaligus membuat
+          // order yang baru masuk ikut hilang.
+          if (order.isSettled) ...[
+            const SizedBox(height: 14),
+            FilledButton.icon(
+              onPressed: _busy ? null : _archive,
+              icon: _busy
+                  ? const SizedBox(
+                      height: 18,
+                      width: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Icon(Icons.done_all),
+              label: const Text('Selesai · Pindahkan ke Riwayat'),
+            ),
+          ],
+
           if (order.canMarkPaid || order.canCancel) ...[
             const SizedBox(height: 14),
             Row(
@@ -654,6 +575,27 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
       if (mounted) showSnack(context, 'Struk diantrikan ulang.');
     } on AppFailure catch (e) {
       if (mounted) showSnack(context, e.message, error: true);
+    }
+  }
+
+  Future<void> _archive() async {
+    final ok = await confirmDialog(
+      context,
+      title: 'Selesaikan order #${order.orderNo}?',
+      message: 'Order ini dipindahkan ke riwayat. Order lain di '
+          '${order.tableLabel} tidak ikut terpengaruh.',
+      confirmLabel: 'Selesaikan',
+    );
+    if (!ok || !mounted) return;
+
+    setState(() => _busy = true);
+    try {
+      await ref.read(cashierBoardProvider.notifier).archiveOrder(order);
+      if (mounted) showSnack(context, 'Order #${order.orderNo} masuk riwayat.');
+    } on AppFailure catch (e) {
+      if (mounted) showSnack(context, e.message, error: true);
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 

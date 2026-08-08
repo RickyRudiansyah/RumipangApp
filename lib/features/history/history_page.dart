@@ -86,6 +86,36 @@ class HistoryPage extends ConsumerWidget {
             },
           ),
         ),
+        // Filter periode + ringkasan uang. Diminta warung: "bole ga si kalo
+        // keliatan hari ini ud dpt brp gtu — omset hr ini".
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SizedBox(
+                height: 44,
+                child: ListView(
+                  scrollDirection: Axis.horizontal,
+                  children: [
+                    for (final r in HistoryRange.values)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: OptionChip(
+                          label: r.label,
+                          selected: ref.watch(historyRangeProvider) == r,
+                          onTap: () =>
+                              ref.read(historyRangeProvider.notifier).select(r),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10),
+              const _HistorySummaryBar(),
+            ],
+          ),
+        ),
         Expanded(
           child: history.when(
             loading: () => const Center(child: CircularProgressIndicator()),
@@ -111,6 +141,62 @@ class HistoryPage extends ConsumerWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Omzet + jumlah order untuk periode yang sedang dipilih.
+class _HistorySummaryBar extends ConsumerWidget {
+  const _HistorySummaryBar();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final s = ref.watch(historySummaryProvider);
+    final range = ref.watch(historyRangeProvider);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: AppTheme.panel(
+        background: AppTheme.paid.withValues(alpha: 0.06),
+        outline: AppTheme.paid.withValues(alpha: 0.30),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Omzet ${range.label.toLowerCase()}',
+                  style: const TextStyle(fontSize: 11, color: Colors.black54),
+                ),
+                Text(
+                  Fmt.rupiah(s.omzet),
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w800,
+                    color: AppTheme.paid,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                '${s.orders} order',
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+              if (s.cancelled > 0)
+                Text(
+                  '${s.cancelled} dibatalkan',
+                  style: const TextStyle(fontSize: 11, color: AppTheme.unpaid),
+                ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }

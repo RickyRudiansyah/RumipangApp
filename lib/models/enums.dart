@@ -58,6 +58,25 @@ enum PaymentMethod {
       v?.toString().toUpperCase() == 'QRIS' ? qris : cash;
 }
 
+/// Tujuan cetak sebuah struk.
+///
+/// Satu order menghasilkan **satu job per stasiun** dengan isi struk yang sama
+/// persis. Dipisah begini — bukan satu job yang dicetak dua kali — supaya
+/// kegagalan di printer dapur tidak menarik ulang salinan kasir yang sudah
+/// keluar. Itu jalan paling mudah menuju struk dobel.
+enum PrintStation {
+  cashier('CASHIER', 'Kasir'),
+  kitchen('KITCHEN', 'Dapur');
+
+  const PrintStation(this.wire, this.label);
+
+  final String wire;
+  final String label;
+
+  static PrintStation parse(Object? v) =>
+      v?.toString().toUpperCase() == 'KITCHEN' ? kitchen : cashier;
+}
+
 enum PrintJobStatus {
   pending('PENDING', 'Menunggu'),
   printing('PRINTING', 'Mencetak'),

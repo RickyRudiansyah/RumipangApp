@@ -1,4 +1,5 @@
 import '../core/api_client.dart';
+import '../models/enums.dart';
 import '../models/json.dart';
 import '../models/print_job.dart';
 
@@ -19,8 +20,17 @@ class PrintRepository {
 
   /// Ambil job `PENDING` **sekaligus menguncinya** jadi `PRINTING`.
   /// Aman untuk banyak perangkat: satu job hanya bisa diklaim satu perangkat.
-  Future<List<PrintJob>> claim({int limit = 3}) async => _parseJobs(
-        await _api.get('/api/print/jobs', query: {'claim': 1, 'limit': limit}),
+  ///
+  /// [station] wajib diisi kalau perangkat ini melayani lebih dari satu
+  /// printer: socket Bluetooth-nya cuma satu, jadi mengklaim job stasiun lain
+  /// berarti menguncinya 2 menit tanpa bisa mencetaknya.
+  Future<List<PrintJob>> claim({int limit = 3, PrintStation? station}) async =>
+      _parseJobs(
+        await _api.get('/api/print/jobs', query: {
+          'claim': 1,
+          'limit': limit,
+          if (station != null) 'station': station.wire,
+        }),
       );
 
   /// 50 job terakhir (semua status) untuk layar monitoring.

@@ -101,36 +101,25 @@ class PrintQueueController extends Notifier<PrintQueueState> {
     if (_pumping) return;
     _pumping = true;
     try {
-      final printer = ref.read(printerServiceProvider);
-      final printerCtl = ref.read(printerControllerProvider.notifier);
+      final stations = ref.read(printerControllerProvider).configured;
+      if (stations.isEmpty) return;
 
-      // Jangan mengklaim job kalau printer belum siap. Job yang sudah diklaim
-      // tapi tidak bisa dicetak akan terkunci di PRINTING selama 2 menit -
-      // struk jadi tertahan lama tanpa alasan.
-      if (!await printerCtl.ensureReady()) return;
+      // Satu printer: jalan lurus seperti dulu, tanpa biaya tambahan.
+      if (stations.length == 1) {
+        await _pumpStation(stations.first);
+        await refreshMonitor();
+        return;
+      }
 
-      final jobs = await ref.read(printRepositoryProvider).claim(
-            limit: Env.printClaimLimit,
-          );
-      if (jobs.isEmpty) return;
-
-      var printerDown = false;
-      for (final job in jobs) {
-        if (printerDown) {
-          // Sisa job yang terlanjur diklaim: kembalikan sekarang juga supaya
-          // tidak menunggu timeout 2 menit di server.
-          await _ack(job, printed: false, error: 'Printer terputus di tengah antrian');
-          continue;
-        }
-        try {
-          await printer.printReceipt(job.textBody);
-          await _ack(job, printed: true);
-          state = state.copyWith(lastSuccessAt: DateTime.now(), clearError: true);
-        } on PrinterFailure catch (e) {
-          printerDown = true;
-          await _ack(job, printed: false, error: e.message);
-          state = state.copyWith(lastError: e.message);
-        }
+      // Dua printer, satu socket. Berpindah printer makan waktu dan kadang
+      // gagal, jadi **jangan berpindah kalau tidak ada yang perlu dicetak** -
+      // itu akan terjadi tiap 4 detik seumur hari. Daftar monitoring (yang
+      // tidak mengunci apa pun) dipakai untuk tahu stasiun mana yang punya
+      // antrian, baru stasiun itu yang disambangi.
+      final waiting = await _stationsWithPendingJobs();
+      for (final station in stations) {
+        if (!waiting.contains(station)) continue;
+        await _pumpStation(station);
       }
       await refreshMonitor();
     } on SessionExpiredFailure {
@@ -139,6 +128,60 @@ class PrintQueueController extends Notifier<PrintQueueState> {
       state = state.copyWith(lastError: e.message);
     } finally {
       _pumping = false;
+    }
+  }
+
+  /// Stasiun yang punya job `PENDING` di server, tanpa menguncinya.
+  Future<Set<PrintStation>> _stationsWithPendingJobs() async {
+    final jobs = await ref.read(printRepositoryProvider).recent();
+    return jobs
+        .where((j) => j.status == PrintJobStatus.pending)
+        .map((j) => j.station)
+        .toSet();
+  }
+
+  /// Cetak seluruh antrian satu stasiun sampai habis, lalu selesai.
+  ///
+  /// Urutannya **sambung dulu, baru klaim**. Job yang diklaim tapi tidak bisa
+  /// dicetak terkunci `PRINTING` selama 2 menit; dengan dua printer itu lebih
+  /// mudah terjadi, karena "printer tersambung" belum tentu berarti printer
+  /// yang benar. Semua ACK stasiun ini juga sudah tuntas sebelum fungsi ini
+  /// kembali — pindah printer selagi ada job yang belum di-ACK adalah cara
+  /// tercepat menuju struk dobel.
+  Future<void> _pumpStation(PrintStation station) async {
+    final printerCtl = ref.read(printerControllerProvider.notifier);
+    if (!await printerCtl.useStation(station)) {
+      final message = ref.read(printerControllerProvider).slot(station).message;
+      if (message != null) {
+        state = state.copyWith(lastError: 'Printer ${station.label}: $message');
+      }
+      return;
+    }
+
+    final printer = ref.read(printerServiceProvider);
+    final jobs = await ref.read(printRepositoryProvider).claim(
+          limit: Env.printClaimLimit,
+          station: station,
+        );
+    if (jobs.isEmpty) return;
+
+    var printerDown = false;
+    for (final job in jobs) {
+      if (printerDown) {
+        // Sisa job yang terlanjur diklaim: kembalikan sekarang juga supaya
+        // tidak menunggu timeout 2 menit di server.
+        await _ack(job, printed: false, error: 'Printer terputus di tengah antrian');
+        continue;
+      }
+      try {
+        await printer.printReceipt(job.textBody);
+        await _ack(job, printed: true);
+        state = state.copyWith(lastSuccessAt: DateTime.now(), clearError: true);
+      } on PrinterFailure catch (e) {
+        printerDown = true;
+        await _ack(job, printed: false, error: e.message);
+        state = state.copyWith(lastError: 'Printer ${station.label}: ${e.message}');
+      }
     }
   }
 

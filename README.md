@@ -139,7 +139,7 @@ lib/
 │   ├── env.dart                 # base URL + anon key (bisa ditimpa --dart-define)
 │   ├── api_client.dart          # REST + Bearer + refresh 401 + retry
 │   ├── failure.dart             # ApiFailure / NetworkFailure / SessionExpired / Printer
-│   ├── local_store.dart         # MAC printer, cache board, antrian aksi tertunda
+│   ├── local_store.dart         # MAC printer per stasiun, cache board, antrian aksi
 │   ├── providers.dart           # dependency injection
 │   └── realtime_service.dart    # websocket + polling cadangan 15 dtk
 ├── models/                      # ditulis tangan, tanpa build_runner
@@ -154,7 +154,7 @@ lib/
 │   ├── reports/                 # menu terlaris & kurang laku, laba kotor
 │   ├── meals/                   # jatah makan karyawan (1x per orang per hari)
 │   ├── settings/                # tema event, dipakai bersama web
-│   ├── printer/                 # SPP, loop klaim-cetak-ACK, foreground service
+│   ├── printer/                 # SPP 2 stasiun, loop klaim-cetak-ACK, foreground service
 │   └── shell/                   # NavigationRail + siklus hidup layanan latar
 └── shared/                      # tema, preset event, breakpoint, format, widget umum
 ```
@@ -244,12 +244,13 @@ Lima layar tambahan, semuanya butuh endpoint di
 
 | Layar | Isi |
 |---|---|
-| **Menu** | Dikelompokkan per kategori. Tambah menu, kategori, dan topping/variasi berharga. Ubah harga, isi HPP, margin otomatis, foto menu (ambil → potong/putar → unggah). Menu yang dijual di bawah modal ditandai merah. |
+| **Menu** | **HPP, margin, dan laba hanya terlihat oleh owner** (`canSeeCostProvider`) — kolomnya, chip-nya, peringatan "HPP belum diisi", judul layar, kolom input di dialog, sampai angka laba per menu di Laporan. Kasir melihat layar yang sama tanpa satu pun angka modal. Ini penjagaan **tampilan**, bukan keamanan: `cost_price` tetap ikut di respons `/api/menu`. Dikelompokkan per kategori. Tambah menu, kategori, dan topping/variasi berharga. Ubah harga, isi HPP, margin otomatis, foto menu (ambil → potong/putar → unggah). Menu yang dijual di bawah modal ditandai merah. |
 | **Stok** | Bahan baku + alert saat menyentuh ambang (default 20, bisa beda per bahan). Perubahan stok lewat "Sesuaikan" beserta alasannya, tidak pernah menimpa angka langsung. |
 | **Laporan** | Menu terlaris & kurang laku, omzet, total HPP, laba kotor. Rentang hari ini / 7 hari / 30 hari. |
 | **Jatah** | Jatah makan karyawan: **satu menu per orang per hari, bebas menu apa pun**. Menunya wajib dipilih (ada kolom cari), dan HPP tidak ditampilkan di layar ini — "HPP belum diisi" di sebelah nama menu membuatnya terbaca seperti menu bermasalah yang tidak boleh diambil. **Owner** bisa menambah karyawan dan mengubah namanya; kasir tidak melihat tombol itu. |
 | **Tema** | Tema event (Normal, Natal, Ramadan, Kemerdekaan, Imlek). Berlaku untuk aplikasi **dan** web. |
-| **Riwayat** | Cari + cetak ulang struk, dan **hapus riwayat per hari / bulan / tahun** (atau semuanya). Jumlah order yang terdampak dihitung dari daftar yang sudah dimuat dan ditampilkan sebelum dikonfirmasi — penghapusannya permanen. |
+| **Printer** | **Dua stasiun: Kasir & Dapur**, masing-masing printer sendiri, struknya sama persis. Satu order = satu job per stasiun (kolom `print_jobs.station` di server). Tiap kartu punya tombol Hubungkan · Tes Cetak · Ganti · Lupakan. |
+| **Riwayat** | Filter periode (Hari Ini · 7 Hari · 30 Hari · Semua) dengan **omzet** periode itu di atasnya. Omzet hanya menjumlahkan order **lunas & tidak dibatalkan** — menjumlahkan semua baris riwayat akan melaporkan uang yang tidak pernah diterima. Cari + cetak ulang struk, dan **hapus riwayat per hari / bulan / tahun** (atau semuanya). Jumlah order yang terdampak dihitung dari daftar yang sudah dimuat dan ditampilkan sebelum dikonfirmasi — penghapusannya permanen. |
 
 Lima keputusan yang mudah dirusak tanpa sengaja:
 
@@ -327,6 +328,13 @@ Semuanya sudah diterapkan; ini catatan supaya tidak tidak sengaja dirusak nanti.
    `print_bluetooth_thermal` dengan `flutter_blue_plus` — printer tidak akan
    terdeteksi sama sekali.
 
+   Paket itu juga memegang **satu socket global**, bukan objek per-koneksi.
+   Dua printer karena itu dilayani bergantian, dan **`PrinterController.useStation()`
+   adalah satu-satunya pintu untuk berpindah** — memanggil
+   `PrinterService.connect()` langsung akan meninggalkan slot lain berstatus
+   "Terhubung" padahal socketnya sudah direbut, dan struk dapur keluar di
+   printer kasir.
+
 7. **`text_body` dipakai apa adanya.** Server sudah merender struk 32 kolom.
    Jangan menyusun format sendiri.
 
@@ -364,6 +372,20 @@ Belum satu pun diverifikasi — butuh tablet + printer fisik.
 - [ ] Nama menu terpanjang tidak merusak lebar 32 kolom
 - [ ] Order tunai: struk **baru** keluar setelah tombol verifikasi ditekan
 - [ ] Order QRIS: struk keluar **otomatis** tanpa disentuh kasir
+
+### Khusus dua printer (kasir + dapur)
+
+Satu socket SPP dipakai bergantian, jadi yang perlu diuji justru **perpindahannya**:
+
+- [ ] Satu order → **dua struk**, satu di tiap printer, isinya sama persis
+- [ ] Printer dapur **dimatikan** → struk kasir tetap keluar, dan job dapur
+      menunggu (bukan menggagalkan keduanya)
+- [ ] Printer dapur dinyalakan lagi → struk yang tertunda menyusul sendiri
+- [ ] Antrian ramai (5+ order) → tidak ada struk yang tercetak **dua kali** di
+      printer yang sama saat aplikasi berpindah-pindah
+- [ ] Aplikasi ditutup paksa tepat saat berpindah printer → setelah dibuka lagi,
+      job yang belum di-ACK tercetak **sekali**, bukan dua kali
+- [ ] Layar Printer: hanya **satu** kartu bertanda "memegang koneksi"
 
 ---
 

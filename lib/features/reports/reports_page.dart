@@ -6,6 +6,7 @@ import '../../shared/format.dart';
 import '../../shared/layout.dart';
 import '../../shared/theme.dart';
 import '../../shared/widgets.dart';
+import '../auth/staff_provider.dart';
 import 'report_provider.dart';
 
 /// Menu terlaris dan kurang laku, plus ringkasan laba kotor.
@@ -78,13 +79,15 @@ class ReportsPage extends ConsumerWidget {
   }
 }
 
-class _Body extends StatelessWidget {
+class _Body extends ConsumerWidget {
   const _Body({required this.report});
 
   final MenuSalesReport report;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    // HPP, laba, dan margin hanya untuk owner (auth/staff_provider.dart).
+    final showCost = ref.watch(canSeeCostProvider);
     final best = report.bestSellers.where((e) => e.qtySold > 0).take(8).toList();
     final worst = report.worstSellers.take(8).toList();
 
@@ -97,18 +100,21 @@ class _Body extends StatelessWidget {
         icon: Icons.payments,
         color: AppTheme.queued,
       ),
-      _Summary(
-        label: 'Total HPP',
-        value: Fmt.rupiah(report.totalCost),
-        icon: Icons.shopping_basket,
-        color: AppTheme.warn,
-      ),
-      _Summary(
-        label: 'Laba kotor',
-        value: Fmt.rupiah(report.totalProfit),
-        icon: Icons.trending_up,
-        color: report.totalProfit < 0 ? AppTheme.unpaid : AppTheme.paid,
-      ),
+      // Angka modal hanya untuk owner (auth/staff_provider.dart).
+      if (showCost) ...[
+        _Summary(
+          label: 'Total HPP',
+          value: Fmt.rupiah(report.totalCost),
+          icon: Icons.shopping_basket,
+          color: AppTheme.warn,
+        ),
+        _Summary(
+          label: 'Laba kotor',
+          value: Fmt.rupiah(report.totalProfit),
+          icon: Icons.trending_up,
+          color: report.totalProfit < 0 ? AppTheme.unpaid : AppTheme.paid,
+        ),
+      ],
       _Summary(
         label: 'Porsi terjual',
         value: '${report.totalQty}',
@@ -121,27 +127,38 @@ class _Body extends StatelessWidget {
       padding: EdgeInsets.all(compact ? 14 : 20),
       children: [
         // Empat kartu sebaris jadi tak terbaca di HP; dipecah dua-dua.
+        //
+        // Jumlah kartunya TIDAK tetap - kasir tidak melihat HPP & laba, jadi
+        // baginya hanya ada dua. Menyusunnya lewat indeks tetap (`summaries[3]`)
+        // akan crash begitu kartunya berkurang.
         if (compact)
           Column(
             children: [
-              Row(children: [summaries[0], const SizedBox(width: 12), summaries[1]]),
-              const SizedBox(height: 12),
-              Row(children: [summaries[2], const SizedBox(width: 12), summaries[3]]),
+              for (var i = 0; i < summaries.length; i += 2) ...[
+                if (i > 0) const SizedBox(height: 12),
+                Row(
+                  children: [
+                    summaries[i],
+                    if (i + 1 < summaries.length) ...[
+                      const SizedBox(width: 12),
+                      summaries[i + 1],
+                    ] else
+                      const Spacer(),
+                  ],
+                ),
+              ],
             ],
           )
         else
           Row(
             children: [
-              summaries[0],
-              const SizedBox(width: 12),
-              summaries[1],
-              const SizedBox(width: 12),
-              summaries[2],
-              const SizedBox(width: 12),
-              summaries[3],
+              for (var i = 0; i < summaries.length; i++) ...[
+                if (i > 0) const SizedBox(width: 12),
+                summaries[i],
+              ],
             ],
           ),
-        if (report.totalCost == 0) ...[
+        if (showCost && report.totalCost == 0) ...[
           const SizedBox(height: 12),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -318,14 +335,17 @@ class _RankCard extends StatelessWidget {
   }
 }
 
-class _StatRow extends StatelessWidget {
+class _StatRow extends ConsumerWidget {
   const _StatRow({required this.stat, required this.accent});
 
   final MenuSalesStat stat;
   final Color accent;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    // Angka laba per menu ikut disembunyikan dari kasir - percuma menutup
+    // ringkasan HPP di atas kalau margin tiap menu masih terbaca di sini.
+    final showCost = ref.watch(canSeeCostProvider);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 7),
       child: Row(
@@ -346,7 +366,7 @@ class _StatRow extends StatelessWidget {
                 if (!stat.neverSold)
                   Text(
                     'omzet ${Fmt.rupiah(stat.revenue)}'
-                    '${stat.cost > 0 ? ' · laba ${Fmt.rupiah(stat.grossProfit)}' : ''}',
+                    '${showCost && stat.cost > 0 ? ' · laba ${Fmt.rupiah(stat.grossProfit)}' : ''}',
                     style: const TextStyle(fontSize: 11, color: Colors.black45),
                   ),
               ],

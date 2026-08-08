@@ -26,29 +26,13 @@ class PrinterSettingsPage extends ConsumerStatefulWidget {
 }
 
 class _PrinterSettingsPageState extends ConsumerState<PrinterSettingsPage> {
-  List<PairedPrinter> _devices = const [];
   List<PrintJob> _jobs = const [];
-  bool _scanning = false;
   bool _loadingJobs = false;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      unawaited(_scan());
-      unawaited(_loadJobs());
-    });
-  }
-
-  Future<void> _scan() async {
-    setState(() => _scanning = true);
-    final devices = await ref.read(printerControllerProvider.notifier).listDevices();
-    if (mounted) {
-      setState(() {
-        _devices = devices;
-        _scanning = false;
-      });
-    }
+    WidgetsBinding.instance.addPostFrameCallback((_) => unawaited(_loadJobs()));
   }
 
   Future<void> _loadJobs() async {
@@ -98,78 +82,15 @@ class _PrinterSettingsPageState extends ConsumerState<PrinterSettingsPage> {
   // ------------------------------------------------------------- kiri ------
 
   Widget _leftPane() {
-    final printer = ref.watch(printerControllerProvider);
     final queue = ref.watch(printQueueProvider);
 
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
-        Container(
-          decoration: AppTheme.panel(
-            outline: printer.isConnected ? AppTheme.paid : AppTheme.unpaid,
-          ),
-          padding: const EdgeInsets.all(18),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                children: [
-                  Icon(
-                    printer.isConnected ? Icons.print : Icons.print_disabled,
-                    color: printer.isConnected ? AppTheme.paid : AppTheme.unpaid,
-                  ),
-                  const SizedBox(width: 10),
-                  Flexible(
-                    child: Text(
-                      printer.label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w800,
-                        color: printer.isConnected ? AppTheme.paid : AppTheme.unpaid,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              Text(
-                printer.deviceName == null
-                    ? 'Belum ada printer dipilih'
-                    : '${printer.deviceName}  ·  ${printer.deviceMac}',
-                style: const TextStyle(color: Colors.black54, fontSize: 13),
-              ),
-              if (printer.message != null) ...[
-                const SizedBox(height: 10),
-                Text(
-                  printer.message!,
-                  style: const TextStyle(color: AppTheme.unpaid, fontSize: 13),
-                ),
-              ],
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: FilledButton.icon(
-                      onPressed: printer.isBusy ? null : _reconnect,
-                      icon: const Icon(Icons.link),
-                      label: const Text('Hubungkan Ulang'),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: printer.deviceMac == null ? null : _testPrint,
-                      icon: const Icon(Icons.receipt),
-                      label: const Text('Tes Cetak'),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
+        for (final station in PrintStation.values) ...[
+          _stationCard(station),
+          const SizedBox(height: 12),
+        ],
         const SizedBox(height: 16),
 
         // --- ringkasan antrian ---
@@ -217,77 +138,120 @@ class _PrinterSettingsPageState extends ConsumerState<PrinterSettingsPage> {
         ),
         const SizedBox(height: 16),
 
-        // --- daftar perangkat ter-pair ---
-        Row(
-          children: [
-            const Flexible(
-              child: Text(
-                'PERANGKAT TER-PAIR',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 1.1,
-                  color: Colors.black45,
-                ),
-              ),
-            ),
-            const Spacer(),
-            TextButton.icon(
-              onPressed: _scanning ? null : _scan,
-              icon: const Icon(Icons.refresh, size: 18),
-              label: Text(_scanning ? 'Mencari...' : 'Muat Ulang'),
-            ),
-          ],
-        ),
-        const SizedBox(height: 4),
-        const Text(
-          'Pairing dilakukan di Pengaturan Bluetooth Android. Aplikasi hanya '
-          'memilih dari perangkat yang sudah dipasangkan.',
-          style: TextStyle(fontSize: 12, color: Colors.black45),
-        ),
-        const SizedBox(height: 10),
-
-        if (_devices.isEmpty && !_scanning)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 16),
-            child: Text(
-              'Tidak ada perangkat ter-pair yang terbaca.',
-              style: TextStyle(color: Colors.black45),
-            ),
-          ),
-        ..._devices.map((device) {
-          final active = device.mac == printer.deviceMac;
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Container(
-              decoration: AppTheme.panel(
-                outline: active ? AppTheme.brand : null,
-                background: active ? AppTheme.brand.withValues(alpha: 0.06) : null,
-              ),
-              child: ListTile(
-                shape:
-                    RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                leading: Icon(
-                  active ? Icons.radio_button_checked : Icons.radio_button_off,
-                  color: active ? AppTheme.brand : Colors.black38,
-                ),
-                title: Text(
-                  device.name,
-                  style: const TextStyle(fontWeight: FontWeight.w600),
-                ),
-                subtitle: Text(device.mac, style: const TextStyle(fontSize: 12)),
-                trailing: active
-                    ? TextButton(onPressed: _forget, child: const Text('Lupakan'))
-                    : null,
-                onTap: active ? null : () => _select(device),
-              ),
-            ),
-          );
-        }),
       ],
     );
+  }
+
+  /// Kartu status satu stasiun: printer mana, sedang tersambung atau tidak,
+  /// dan tombol yang dibutuhkan kasir saat printernya bermasalah.
+  Widget _stationCard(PrintStation station) {
+    final printer = ref.watch(printerControllerProvider);
+    final slot = printer.slot(station);
+    final active = printer.activeStation == station;
+
+    final color = switch (slot.link) {
+      PrinterLinkState.connected => AppTheme.paid,
+      PrinterLinkState.notSelected => Colors.black45,
+      PrinterLinkState.connecting => AppTheme.warn,
+      _ => AppTheme.unpaid,
+    };
+
+    return Container(
+      decoration: AppTheme.panel(outline: color.withValues(alpha: 0.55)),
+      padding: const EdgeInsets.all(18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Icon(
+                station == PrintStation.kitchen ? Icons.soup_kitchen : Icons.point_of_sale,
+                color: color,
+              ),
+              const SizedBox(width: 10),
+              Text(
+                'Printer ${station.label}',
+                style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+              ),
+              const Spacer(),
+              // Socketnya cuma satu - penanda ini menjelaskan kenapa printer
+              // lain berstatus "Terputus" padahal tidak rusak.
+              if (active)
+                const StatusChip(label: 'memegang koneksi', color: AppTheme.brand),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            slot.deviceMac == null
+                ? 'Belum ada printer dipilih'
+                : '${slot.deviceName}  ·  ${slot.deviceMac}',
+            style: const TextStyle(color: Colors.black54, fontSize: 13),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            slot.label,
+            style: TextStyle(color: color, fontSize: 13, fontWeight: FontWeight.w700),
+          ),
+          if (slot.message != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              slot.message!,
+              style: const TextStyle(color: AppTheme.unpaid, fontSize: 13),
+            ),
+          ],
+          const SizedBox(height: 14),
+          if (!slot.isSelected)
+            FilledButton.icon(
+              onPressed: () => _pickDevice(station),
+              icon: const Icon(Icons.add_link),
+              label: const Text('Pilih Printer'),
+            )
+          else
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                FilledButton.icon(
+                  onPressed: slot.isBusy ? null : () => _reconnect(station),
+                  icon: const Icon(Icons.link, size: 18),
+                  label: const Text('Hubungkan'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: () => _testPrint(station),
+                  icon: const Icon(Icons.receipt, size: 18),
+                  label: const Text('Tes Cetak'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: () => _pickDevice(station),
+                  icon: const Icon(Icons.swap_horiz, size: 18),
+                  label: const Text('Ganti'),
+                ),
+                TextButton(
+                  onPressed: () => _forget(station),
+                  style: TextButton.styleFrom(foregroundColor: AppTheme.unpaid),
+                  child: const Text('Lupakan'),
+                ),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// Dialog pilih perangkat untuk satu stasiun.
+  ///
+  /// Dialognya **memindai sendiri**. Versi sebelumnya memakai daftar milik
+  /// halaman ini, dan itu gagal dua kali sekaligus: kalau pemindaian dari
+  /// `initState` masih jalan saat tombol ditekan, dialog terbuka dengan daftar
+  /// kosong - dan karena dialog adalah route terpisah, `setState` di halaman
+  /// tidak pernah sampai ke sana. Layarnya diam kosong selamanya. Ini terjadi
+  /// di warung.
+  Future<void> _pickDevice(PrintStation station) async {
+    final picked = await showDialog<PairedPrinter>(
+      context: context,
+      builder: (_) => _DevicePickerDialog(station: station),
+    );
+    if (picked != null && mounted) await _select(station, picked);
   }
 
   // ------------------------------------------------------------ kanan ------
@@ -349,40 +313,49 @@ class _PrinterSettingsPageState extends ConsumerState<PrinterSettingsPage> {
 
   // ------------------------------------------------------------- aksi ------
 
-  Future<void> _select(PairedPrinter device) async {
-    await ref.read(printerControllerProvider.notifier).select(device);
+  Future<void> _select(PrintStation station, PairedPrinter device) async {
+    try {
+      await ref.read(printerControllerProvider.notifier).select(station, device);
+    } on PrinterFailure catch (e) {
+      // Mis. printer yang sama sudah dipakai stasiun lain.
+      if (mounted) showSnack(context, e.message, error: true);
+      return;
+    }
     if (!mounted) return;
-    final status = ref.read(printerControllerProvider);
+    final slot = ref.read(printerControllerProvider).slot(station);
     showSnack(
       context,
-      status.isConnected
-          ? 'Tersambung ke ${device.name}'
-          : status.message ?? 'Gagal menyambung ke ${device.name}',
-      error: !status.isConnected,
+      slot.isConnected
+          ? '${device.name} jadi printer ${station.label}.'
+          : slot.message ?? 'Gagal menyambung ke ${device.name}',
+      error: !slot.isConnected,
     );
   }
 
-  Future<void> _forget() async {
-    await ref.read(printerControllerProvider.notifier).forget();
-    if (mounted) showSnack(context, 'Printer dilepas dari aplikasi.');
+  Future<void> _forget(PrintStation station) async {
+    await ref.read(printerControllerProvider.notifier).forget(station);
+    if (mounted) showSnack(context, 'Printer ${station.label} dilepas.');
   }
 
-  Future<void> _reconnect() async {
-    final ok = await ref.read(printerControllerProvider.notifier).connect();
+  Future<void> _reconnect(PrintStation station) async {
+    final ok = await ref.read(printerControllerProvider.notifier).useStation(station);
     if (!mounted) return;
     showSnack(
       context,
       ok
-          ? 'Printer tersambung.'
-          : ref.read(printerControllerProvider).message ?? 'Gagal menyambung.',
+          ? 'Printer ${station.label} tersambung.'
+          : ref.read(printerControllerProvider).slot(station).message ??
+              'Gagal menyambung.',
       error: !ok,
     );
   }
 
-  Future<void> _testPrint() async {
+  Future<void> _testPrint(PrintStation station) async {
     try {
-      await ref.read(printerControllerProvider.notifier).testPrint();
-      if (mounted) showSnack(context, 'Struk contoh dikirim ke printer.');
+      await ref.read(printerControllerProvider.notifier).testPrint(station);
+      if (mounted) {
+        showSnack(context, 'Struk contoh dikirim ke printer ${station.label}.');
+      }
     } on AppFailure catch (e) {
       if (mounted) showSnack(context, e.message, error: true);
     }
@@ -493,6 +466,9 @@ class _JobTile extends StatelessWidget {
                 style: const TextStyle(color: Colors.black54, fontSize: 13),
               ),
               StatusChip(label: job.kind.label, color: Colors.black45),
+              // Satu order menghasilkan dua job dengan nomor sama - tanpa
+              // penanda ini keduanya terlihat seperti struk dobel.
+              StatusChip(label: job.station.label, color: AppTheme.brand),
             ],
           ),
           const SizedBox(height: 4),
@@ -528,6 +504,133 @@ class _JobTile extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+
+/// Pemilih perangkat Bluetooth untuk satu stasiun.
+///
+/// Memindai **di dalam dirinya sendiri**, bukan menumpang daftar milik halaman
+/// printer. Alasannya mahal dipelajari: dialog adalah route terpisah, jadi
+/// `setState` di halaman induk tidak pernah merender ulang isinya. Daftar yang
+/// datang belakangan tidak akan pernah muncul, dan kasir melihat "tidak ada
+/// perangkat" padahal kedua printernya menyala.
+class _DevicePickerDialog extends ConsumerStatefulWidget {
+  const _DevicePickerDialog({required this.station});
+
+  final PrintStation station;
+
+  @override
+  ConsumerState<_DevicePickerDialog> createState() => _DevicePickerDialogState();
+}
+
+class _DevicePickerDialogState extends ConsumerState<_DevicePickerDialog> {
+  List<PairedPrinter> _devices = const [];
+  bool _scanning = true;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => unawaited(_scan()));
+  }
+
+  Future<void> _scan() async {
+    setState(() => _scanning = true);
+    final devices = await ref
+        .read(printerControllerProvider.notifier)
+        .listDevices(widget.station);
+    if (mounted) {
+      setState(() {
+        _devices = devices;
+        _scanning = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Printer yang sudah dipegang stasiun lain ditandai, bukan disembunyikan -
+    // kasir perlu tahu kenapa printer yang ia cari tidak bisa dipilih.
+    final taken = <String, PrintStation>{};
+    final status = ref.watch(printerControllerProvider);
+    for (final s in PrintStation.values) {
+      if (s == widget.station) continue;
+      final mac = status.slot(s).deviceMac;
+      if (mac != null) taken[mac] = s;
+    }
+
+    return AlertDialog(
+      title: Text('Printer ${widget.station.label}'),
+      content: SizedBox(
+        width: context.dialogWidth(420),
+        height: 380,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text(
+              'Pairing dilakukan di Pengaturan Bluetooth Android. Aplikasi '
+              'hanya memilih dari perangkat yang sudah dipasangkan.',
+              style: TextStyle(fontSize: 12, color: Colors.black45),
+            ),
+            const SizedBox(height: 12),
+            Expanded(
+              child: _scanning
+                  ? const Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          CircularProgressIndicator(),
+                          SizedBox(height: 14),
+                          Text('Mencari perangkat...',
+                              style: TextStyle(color: Colors.black54)),
+                        ],
+                      ),
+                    )
+                  : _devices.isEmpty
+                      ? const EmptyState(
+                          icon: Icons.bluetooth_disabled,
+                          title: 'Tidak ada perangkat ter-pair',
+                          subtitle: 'Pasangkan printer dulu di Pengaturan > '
+                              'Bluetooth, lalu tekan Cari Ulang.',
+                        )
+                      : ListView(
+                          children: [
+                            for (final device in _devices)
+                              ListTile(
+                                enabled: !taken.containsKey(device.mac),
+                                leading: Icon(
+                                  taken.containsKey(device.mac)
+                                      ? Icons.lock_outline
+                                      : Icons.print,
+                                ),
+                                title: Text(device.name),
+                                subtitle: Text(
+                                  taken.containsKey(device.mac)
+                                      ? 'Dipakai printer ${taken[device.mac]!.label}'
+                                      : device.mac,
+                                  style: const TextStyle(fontSize: 12),
+                                ),
+                                onTap: taken.containsKey(device.mac)
+                                    ? null
+                                    : () => Navigator.pop(context, device),
+                              ),
+                          ],
+                        ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _scanning ? null : _scan,
+          child: const Text('Cari Ulang'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Tutup'),
+        ),
+      ],
     );
   }
 }

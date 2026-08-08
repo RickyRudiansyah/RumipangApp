@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../models/enums.dart';
+
 /// Penyimpanan lokal ringan: pilihan printer, cache board, dan antrian aksi
 /// yang belum sempat dikirim ke server.
 ///
@@ -17,20 +19,48 @@ class LocalStore {
 
   // -------------------------------------------------------------- printer ---
 
-  static const _kPrinterMac = 'printer.mac';
-  static const _kPrinterName = 'printer.name';
+  // Kunci lama dari zaman satu printer. Masih dibaca sekali saat migrasi
+  // supaya kasir yang sudah memasangkan printernya tidak perlu memilih ulang.
+  static const _kLegacyMac = 'printer.mac';
+  static const _kLegacyName = 'printer.name';
 
-  String? get printerMac => _prefs.getString(_kPrinterMac);
-  String? get printerName => _prefs.getString(_kPrinterName);
+  static String _macKey(PrintStation s) => 'printer.${s.wire}.mac';
+  static String _nameKey(PrintStation s) => 'printer.${s.wire}.name';
 
-  Future<void> savePrinter({required String mac, required String name}) async {
-    await _prefs.setString(_kPrinterMac, mac);
-    await _prefs.setString(_kPrinterName, name);
+  String? printerMac(PrintStation station) => _prefs.getString(_macKey(station));
+  String? printerName(PrintStation station) => _prefs.getString(_nameKey(station));
+
+  Future<void> savePrinter(
+    PrintStation station, {
+    required String mac,
+    required String name,
+  }) async {
+    await _prefs.setString(_macKey(station), mac);
+    await _prefs.setString(_nameKey(station), name);
   }
 
-  Future<void> clearPrinter() async {
-    await _prefs.remove(_kPrinterMac);
-    await _prefs.remove(_kPrinterName);
+  Future<void> clearPrinter(PrintStation station) async {
+    await _prefs.remove(_macKey(station));
+    await _prefs.remove(_nameKey(station));
+  }
+
+  /// Pindahkan printer tunggal versi lama ke slot kasir.
+  ///
+  /// Dijalankan sekali saat aplikasi mulai. Tanpa ini, pembaruan aplikasi akan
+  /// terasa seperti printernya "hilang" — dan kasir memasangkan ulang di pagi
+  /// yang sibuk.
+  Future<void> migrateLegacyPrinter() async {
+    final mac = _prefs.getString(_kLegacyMac);
+    if (mac == null) return;
+    if (printerMac(PrintStation.cashier) == null) {
+      await savePrinter(
+        PrintStation.cashier,
+        mac: mac,
+        name: _prefs.getString(_kLegacyName) ?? 'Printer',
+      );
+    }
+    await _prefs.remove(_kLegacyMac);
+    await _prefs.remove(_kLegacyName);
   }
 
   // ---------------------------------------------------------------- cache ---

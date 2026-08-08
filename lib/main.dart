@@ -43,6 +43,10 @@ Future<void> main() async {
   PrintForegroundService.init();
 
   final localStore = await LocalStore.open();
+  // Printer tunggal versi lama dipindah ke slot kasir. Harus sebelum
+  // PrinterController dibangun, kalau tidak kasir akan mengira printernya
+  // hilang setelah aplikasi diperbarui.
+  await localStore.migrateLegacyPrinter();
 
   runApp(
     ProviderScope(

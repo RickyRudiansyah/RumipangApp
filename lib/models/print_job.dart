@@ -10,6 +10,7 @@ class PrintJob {
     required this.id,
     required this.orderId,
     required this.kind,
+    required this.station,
     required this.status,
     required this.trigger,
     required this.textBody,
@@ -26,6 +27,7 @@ class PrintJob {
         id: asString(json['id']),
         orderId: asString(json['order_id']),
         kind: PrintJobKind.parse(json['kind']),
+        station: PrintStation.parse(json['station']),
         status: PrintJobStatus.parse(json['status']),
         trigger: PrintTrigger.parse(json['trigger']),
         textBody: asString(json['text_body']),
@@ -41,6 +43,10 @@ class PrintJob {
   final String id;
   final String orderId;
   final PrintJobKind kind;
+
+  /// Printer tujuan. Baris lama tanpa kolom ini terbaca sebagai `cashier`.
+  final PrintStation station;
+
   final PrintJobStatus status;
   final PrintTrigger trigger;
 

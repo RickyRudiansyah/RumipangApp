@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/failure.dart';
@@ -103,6 +105,9 @@ class CashierBoardNotifier extends AsyncNotifier<BoardData> {
   /// Muat ulang tanpa mengedipkan spinner - dipakai realtime & polling.
   Future<void> refresh() async {
     state = await AsyncValue.guard(_fetch);
+    // Order QRIS baru tidak pernah lewat board, jadi hitungannya di panel meja
+    // hanya ikut segar kalau disegarkan di sini juga.
+    unawaited(ref.read(qrisPaidProvider.notifier).refresh());
   }
 
   // ------------------------------------------------------------- aksi ------
@@ -132,15 +137,14 @@ class CashierBoardNotifier extends AsyncNotifier<BoardData> {
     await refresh();
   }
 
-  /// Arsipkan seluruh order di satu meja - tombol "Selesai" kasir.
+  /// Arsipkan **satu** order - tombol "Selesai" di kartunya sendiri.
   ///
-  /// Dipakai untuk order **tunai**; yang QRIS sudah lebih dulu diarsipkan
-  /// server sendiri saat pembayarannya settle.
-  Future<void> archiveGroup(TableGroup group) async {
-    final repo = ref.read(orderRepositoryProvider);
-    for (final order in group.orders) {
-      await repo.archive(order.id);
-    }
+  /// Sengaja per order, bukan per meja. Satu meja bisa memesan beberapa kali
+  /// dalam satu malam; menutup semuanya sekaligus berarti order baru yang baru
+  /// masuk ikut hilang, dan order lama yang belum diselesaikan malah terlihat
+  /// menyatu dengan yang baru. Itu keluhan nomor satu dari warung.
+  Future<void> archiveOrder(OrderModel order) async {
+    await ref.read(orderRepositoryProvider).archive(order.id);
     await refresh();
   }
 }
@@ -184,6 +188,32 @@ final tableGroupsProvider = Provider<List<TableGroup>>((ref) {
   });
   return groups;
 });
+
+/// Order QRIS lunas hari ini - hanya untuk dilihat, tidak ada aksinya.
+///
+/// Board kasir sengaja hanya berisi pekerjaan yang belum selesai (praktisnya:
+/// order tunai). QRIS sudah dibayar sebelum ordernya lahir, jadi ia langsung
+/// masuk riwayat - dan warung sempat kehilangan pandangan atas pesanan yang
+/// justru sudah dibayar. Daftar ini mengembalikan pandangan itu tanpa
+/// menaruhnya kembali ke antrean pekerjaan.
+class QrisPaidNotifier extends AsyncNotifier<List<OrderModel>> {
+  @override
+  Future<List<OrderModel>> build() => _fetch();
+
+  Future<List<OrderModel>> _fetch() {
+    final now = DateTime.now();
+    return ref
+        .read(orderRepositoryProvider)
+        .qrisPaid(since: DateTime(now.year, now.month, now.day));
+  }
+
+  Future<void> refresh() async {
+    state = await AsyncValue.guard(_fetch);
+  }
+}
+
+final qrisPaidProvider =
+    AsyncNotifierProvider<QrisPaidNotifier, List<OrderModel>>(QrisPaidNotifier.new);
 
 /// Jumlah order yang belum dibayar - dipakai lencana di navigasi.
 final unpaidCountProvider = Provider<int>((ref) {

@@ -185,6 +185,7 @@ class PrintQueueController extends Notifier<PrintQueueState> {
     }
 
     final printer = ref.read(printerServiceProvider);
+    final store = ref.read(localStoreProvider);
     final jobs = await ref.read(printRepositoryProvider).claim(
           limit: Env.printClaimLimit,
           station: station,
@@ -200,7 +201,18 @@ class PrintQueueController extends Notifier<PrintQueueState> {
         continue;
       }
       try {
+        // Kertasnya sudah keluar di percobaan sebelumnya, hanya ACK-nya yang
+        // belum sampai. Mencetaknya lagi = struk dobel.
+        if (store.printedPendingAck.contains(job.id)) {
+          await _ack(job, printed: true);
+          continue;
+        }
+
         await printer.printReceipt(job.textBody);
+        // Dicatat SEBELUM ACK dikirim. Kalau aplikasi mati tepat di sini,
+        // catatan inilah yang mencegah kertasnya keluar dua kali.
+        await store.markPrinted(job.id);
+
         await _ack(job, printed: true);
         state = state.copyWith(lastSuccessAt: DateTime.now(), clearError: true);
       } on PrinterFailure catch (e) {
@@ -221,9 +233,13 @@ class PrintQueueController extends Notifier<PrintQueueState> {
     for (var attempt = 0; attempt < 5; attempt++) {
       try {
         await repo.ack(job.id, printed: printed, error: error);
+        await ref.read(localStoreProvider).clearPrinted(job.id);
         return;
       } on ApiFailure {
-        return; // 404/400: server sudah memindahkan job, tidak perlu dipaksa
+        // 404/400: server sudah memindahkan job sendiri, jadi urusannya
+        // selesai - catatan lokalnya ikut dibuang.
+        await ref.read(localStoreProvider).clearPrinted(job.id);
+        return;
       } on SessionExpiredFailure {
         rethrow;
       } on AppFailure {

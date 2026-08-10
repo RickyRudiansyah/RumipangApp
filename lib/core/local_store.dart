@@ -63,6 +63,40 @@ class LocalStore {
     await _prefs.remove(_kLegacyName);
   }
 
+  // ----------------------------------------------- struk sudah tercetak ---
+
+  static const _kPrinted = 'printer.printed_pending_ack';
+
+  /// Job yang **kertasnya sudah keluar** tapi ACK-nya belum sampai server.
+  ///
+  /// Tanpa catatan ini, aplikasi yang ditutup paksa di antara "mencetak" dan
+  /// "ACK" akan mencetak ulang struk yang sama: server mengembalikan job ke
+  /// `PENDING` setelah 2 menit, aplikasi mengklaimnya lagi, dan kertasnya
+  /// keluar untuk kedua kalinya. Pernah terjadi - enam struk lama tercetak
+  /// sekaligus begitu aplikasi dibuka kembali.
+  ///
+  /// Disimpan **sebelum** ACK dikirim, dihapus **setelah** ACK diterima.
+  Set<String> get printedPendingAck {
+    final raw = _prefs.getStringList(_kPrinted);
+    return raw == null ? <String>{} : raw.toSet();
+  }
+
+  Future<void> markPrinted(String jobId) async {
+    final ids = printedPendingAck..add(jobId);
+    // Dipangkas supaya tidak tumbuh selamanya. Job yang ACK-nya benar-benar
+    // hilang selama 200 struk berikutnya sudah lama jadi urusan server.
+    final list = ids.toList();
+    await _prefs.setStringList(
+      _kPrinted,
+      list.length <= 200 ? list : list.sublist(list.length - 200),
+    );
+  }
+
+  Future<void> clearPrinted(String jobId) async {
+    final ids = printedPendingAck..remove(jobId);
+    await _prefs.setStringList(_kPrinted, ids.toList());
+  }
+
   // ---------------------------------------------------------------- cache ---
 
   static const _kBoardCache = 'cache.board.';

@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/providers.dart';
 import '../../models/enums.dart';
+import '../../models/expense.dart';
 import '../../models/order.dart';
 
 /// Riwayat: order yang sudah diarsipkan **atau** dibatalkan.
@@ -69,18 +70,95 @@ class HistoryRangeNotifier extends Notifier<HistoryRange> {
 final historyRangeProvider =
     NotifierProvider<HistoryRangeNotifier, HistoryRange>(HistoryRangeNotifier.new);
 
+/// Satu tanggal tertentu. Kalau diisi, ia **menimpa** [historyRangeProvider].
+///
+/// Warung tutup tengah malam, jadi begitu lewat pukul 00.00 rentang "Hari Ini"
+/// langsung kosong dan omzet semalam terlempar ke kemarin - yang tanpa ini
+/// tidak bisa dilihat sama sekali.
+class HistoryDayNotifier extends Notifier<DateTime?> {
+  @override
+  DateTime? build() => null;
+
+  /// Selalu disimpan sebagai tengah malam, supaya perbandingannya bersih.
+  void select(DateTime? day) => state =
+      day == null ? null : DateTime(day.year, day.month, day.day);
+}
+
+final historyDayProvider =
+    NotifierProvider<HistoryDayNotifier, DateTime?>(HistoryDayNotifier.new);
+
 final filteredHistoryProvider = Provider<List<OrderModel>>((ref) {
   final all = ref.watch(historyProvider).value ?? const <OrderModel>[];
   final query = ref.watch(historyQueryProvider).trim().toLowerCase();
-  final since = ref.watch(historyRangeProvider).since;
+  final day = ref.watch(historyDayProvider);
+  final since = day ?? ref.watch(historyRangeProvider).since;
+  // Tanggal tertentu punya batas atas; rentang "N hari terakhir" tidak.
+  final until = day?.add(const Duration(days: 1));
 
   return all.where((o) {
     if (since != null && o.createdAt.isBefore(since)) return false;
+    if (until != null && !o.createdAt.isBefore(until)) return false;
     if (query.isEmpty) return true;
     return o.orderNo.toLowerCase().contains(query) ||
         o.tableLabel.toLowerCase().contains(query) ||
         o.items.any((i) => i.menuItemName.toLowerCase().contains(query));
   }).toList();
+});
+
+/// Rentang tanggal yang sedang dilihat: `(dari, sampai)`, `sampai` eksklusif.
+///
+/// Satu sumber untuk omzet **dan** pengeluaran. Kalau keduanya menghitung
+/// rentangnya sendiri-sendiri, cepat atau lambat salah satu bergeser dan angka
+/// "bersih" jadi mengurangkan pengeluaran hari lain.
+final historyRangeBoundsProvider = Provider<(DateTime?, DateTime?)>((ref) {
+  final day = ref.watch(historyDayProvider);
+  if (day != null) return (day, day.add(const Duration(days: 1)));
+  return (ref.watch(historyRangeProvider).since, null);
+});
+
+/// Pengeluaran untuk rentang yang sedang dilihat.
+class ExpensesNotifier extends AsyncNotifier<List<Expense>> {
+  @override
+  Future<List<Expense>> build() {
+    final (from, to) = ref.watch(historyRangeBoundsProvider);
+    return ref.read(expenseRepositoryProvider).list(from: from, to: to);
+  }
+
+  Future<void> refresh() async {
+    final (from, to) = ref.read(historyRangeBoundsProvider);
+    state = await AsyncValue.guard(
+      () => ref.read(expenseRepositoryProvider).list(from: from, to: to),
+    );
+  }
+
+  Future<void> add({required int amount, required String note}) async {
+    // Dicatat pada tanggal yang sedang dilihat, bukan selalu hari ini - kalau
+    // Vona sedang membuka tanggal kemarin untuk merekap, pengeluaran yang ia
+    // masukkan jelas milik kemarin.
+    final day = ref.read(historyDayProvider);
+    await ref.read(expenseRepositoryProvider).create(
+          amount: amount,
+          note: note,
+          spentAt: day == null
+              ? null
+              : DateTime(day.year, day.month, day.day, 12), // tengah hari: aman dari zona waktu
+        );
+    await refresh();
+  }
+
+  Future<void> remove(String id) async {
+    await ref.read(expenseRepositoryProvider).remove(id);
+    await refresh();
+  }
+}
+
+final expensesProvider =
+    AsyncNotifierProvider<ExpensesNotifier, List<Expense>>(ExpensesNotifier.new);
+
+/// Total pengeluaran periode yang sedang dilihat.
+final expenseTotalProvider = Provider<int>((ref) {
+  final list = ref.watch(expensesProvider).value ?? const <Expense>[];
+  return list.fold(0, (sum, e) => sum + e.amount);
 });
 
 /// Ringkasan uang untuk rentang yang sedang dilihat.

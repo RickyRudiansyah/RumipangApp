@@ -440,14 +440,26 @@ class _MenuCard extends ConsumerWidget {
       return;
     }
 
-    final chosen = await showDialog<List<MenuVariation>>(
+    final chosen = await showDialog<_VariationChoice>(
       context: context,
       builder: (ctx) => _VariationDialog(item: item, byType: byType),
     );
     if (chosen != null) {
-      ref.read(cartProvider.notifier).add(item, variations: chosen);
+      ref.read(cartProvider.notifier).add(
+            item,
+            variations: chosen.variations,
+            notes: chosen.notes,
+          );
     }
   }
+}
+
+/// Hasil dialog variasi: pilihan + catatan untuk dapur.
+class _VariationChoice {
+  const _VariationChoice({required this.variations, this.notes});
+
+  final List<MenuVariation> variations;
+  final String? notes;
 }
 
 class _VariationDialog extends StatefulWidget {
@@ -461,6 +473,14 @@ class _VariationDialog extends StatefulWidget {
 }
 
 class _VariationDialogState extends State<_VariationDialog> {
+  final _notes = TextEditingController();
+
+  @override
+  void dispose() {
+    _notes.dispose();
+    super.dispose();
+  }
+
   /// Pilihan per jenis variasi. Jenis yang **tidak ada** di map berarti
   /// "tanpa" - dan itu pilihan yang sah, bukan keadaan setengah jadi.
   final Map<String, MenuVariation> _selected = {};
@@ -559,6 +579,20 @@ class _VariationDialogState extends State<_VariationDialog> {
                   ],
                 ),
               ],
+              const SizedBox(height: 18),
+              // Permintaan yang tidak masuk ke variasi mana pun: "kuah dikit",
+              // "telur setengah matang". Sebelumnya kasir tidak punya tempat
+              // menuliskannya, jadi pesannya dititipkan lisan ke koki - dan
+              // hilang begitu dapur sedang ramai.
+              TextField(
+                controller: _notes,
+                textCapitalization: TextCapitalization.sentences,
+                decoration: const InputDecoration(
+                  isDense: true,
+                  labelText: 'Catatan untuk dapur (opsional)',
+                  hintText: 'mis. kuah sedikit, telur setengah matang',
+                ),
+              ),
             ],
           ),
         ),
@@ -567,7 +601,13 @@ class _VariationDialogState extends State<_VariationDialog> {
         TextButton(onPressed: () => Navigator.pop(context), child: const Text('Batal')),
         FilledButton(
           onPressed: _missing.isEmpty
-              ? () => Navigator.pop(context, _selected.values.toList())
+              ? () => Navigator.pop(
+                    context,
+                    _VariationChoice(
+                      variations: _selected.values.toList(),
+                      notes: _notes.text.trim().isEmpty ? null : _notes.text.trim(),
+                    ),
+                  )
               : null,
           child: Text(
             _missing.isNotEmpty
@@ -791,6 +831,41 @@ class _CartRow extends ConsumerWidget {
 
   final CartLine line;
 
+  Future<void> _editNotes(BuildContext context, WidgetRef ref) async {
+    final controller = TextEditingController(text: line.notes ?? '');
+    final saved = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(line.item.name),
+        content: SizedBox(
+          width: context.dialogWidth(420),
+          child: TextField(
+            controller: controller,
+            autofocus: true,
+            maxLength: 120,
+            textCapitalization: TextCapitalization.sentences,
+            decoration: const InputDecoration(
+              labelText: 'Catatan untuk dapur',
+              hintText: 'mis. kuah sedikit, telur setengah matang',
+            ),
+            onSubmitted: (v) => Navigator.pop(ctx, v.trim()),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Batal')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text('Simpan'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (saved != null) {
+      ref.read(cartProvider.notifier).setLineNotes(line.key, saved);
+    }
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final cart = ref.read(cartProvider.notifier);
@@ -808,6 +883,35 @@ class _CartRow extends ConsumerWidget {
               Text(
                 Fmt.rupiah(line.item.price + line.extraPerUnit),
                 style: const TextStyle(fontSize: 12, color: Colors.black54),
+              ),
+              // Catatan dapur, bisa diubah kapan saja sebelum order dikirim.
+              InkWell(
+                onTap: () => _editNotes(context, ref),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Row(
+                    children: [
+                      Icon(
+                        line.notes == null ? Icons.add_comment_outlined : Icons.comment,
+                        size: 13,
+                        color: line.notes == null ? Colors.black38 : AppTheme.warn,
+                      ),
+                      const SizedBox(width: 4),
+                      Flexible(
+                        child: Text(
+                          line.notes ?? 'Tambah catatan',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontStyle: FontStyle.italic,
+                            color: line.notes == null ? Colors.black38 : AppTheme.warn,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ],
           ),

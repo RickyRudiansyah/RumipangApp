@@ -48,9 +48,17 @@ class StaffMeal {
         staffId: asString(json['staff_id']),
         mealDate: asDateOr(json['meal_date'], DateTime.now()),
         costSnapshot: asInt(json['cost_snapshot']),
-        staffName: asStringOrNull(json['staff_name']),
-        menuItemId: asStringOrNull(json['menu_item_id']),
-        menuItemName: asStringOrNull(json['menu_item_name']),
+        // Server mengirim hasil join sebagai objek bersarang
+        // (`menu_item: { id, name }`), bukan kolom datar. Membaca
+        // `menu_item_name` saja selalu menghasilkan null - dan kartu jatah
+        // makan berkata "Tidak dicatat" walau menunya jelas sudah dipilih.
+        // Bentuk datar tetap didahulukan kalau suatu saat server mengirimnya.
+        staffName: asStringOrNull(json['staff_name']) ??
+            asStringOrNull(asMapOrNull(json['staff'])?['name']),
+        menuItemId: asStringOrNull(json['menu_item_id']) ??
+            asStringOrNull(asMapOrNull(json['menu_item'])?['id']),
+        menuItemName: asStringOrNull(json['menu_item_name']) ??
+            asStringOrNull(asMapOrNull(json['menu_item'])?['name']),
         note: asStringOrNull(json['note']),
       );
 

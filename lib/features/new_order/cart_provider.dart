@@ -130,6 +130,27 @@ class CartNotifier extends Notifier<CartState> {
     );
   }
 
+  /// Ubah catatan satu baris keranjang.
+  ///
+  /// Menu tanpa variasi tidak pernah membuka dialog, jadi tanpa ini permintaan
+  /// seperti "telur setengah matang" tidak punya tempat sama sekali.
+  void setLineNotes(String key, String? notes) {
+    state = state.copyWith(
+      lines: [
+        for (final line in state.lines)
+          if (line.key == key)
+            CartLine(
+              item: line.item,
+              variations: line.variations,
+              quantity: line.quantity,
+              notes: (notes == null || notes.isEmpty) ? null : notes,
+            )
+          else
+            line,
+      ],
+    );
+  }
+
   void remove(String key) =>
       state = state.copyWith(lines: state.lines.where((l) => l.key != key).toList());
 

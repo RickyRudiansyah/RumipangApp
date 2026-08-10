@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/failure.dart';
 import '../../core/providers.dart';
 import '../../models/enums.dart';
+import '../../models/expense.dart';
 import '../../models/order.dart';
 import '../../shared/format.dart';
 import '../../shared/layout.dart';
@@ -103,11 +104,27 @@ class HistoryPage extends ConsumerWidget {
                         padding: const EdgeInsets.only(right: 8),
                         child: OptionChip(
                           label: r.label,
-                          selected: ref.watch(historyRangeProvider) == r,
-                          onTap: () =>
-                              ref.read(historyRangeProvider.notifier).select(r),
+                          // Tanggal tertentu menimpa rentang, jadi memilih
+                          // rentang harus melepaskannya - kalau tidak, chip
+                          // terlihat aktif tapi tidak mengubah apa pun.
+                          selected: ref.watch(historyDayProvider) == null &&
+                              ref.watch(historyRangeProvider) == r,
+                          onTap: () {
+                            ref.read(historyDayProvider.notifier).select(null);
+                            ref.read(historyRangeProvider.notifier).select(r);
+                          },
                         ),
                       ),
+                    Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: OptionChip(
+                        label: ref.watch(historyDayProvider) == null
+                            ? 'Pilih Tanggal'
+                            : Fmt.dayOnly(ref.watch(historyDayProvider)!),
+                        selected: ref.watch(historyDayProvider) != null,
+                        onTap: () => _pickDay(context, ref),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -145,59 +162,288 @@ class HistoryPage extends ConsumerWidget {
   }
 }
 
-/// Omzet + jumlah order untuk periode yang sedang dipilih.
+/// Ringkasan uang periode terpilih: pemasukan - pengeluaran = bersih.
 class _HistorySummaryBar extends ConsumerWidget {
   const _HistorySummaryBar();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final s = ref.watch(historySummaryProvider);
+    final spent = ref.watch(expenseTotalProvider);
+    final day = ref.watch(historyDayProvider);
     final range = ref.watch(historyRangeProvider);
+    final label = day != null ? Fmt.dayOnly(day) : range.label.toLowerCase();
+    final net = s.omzet - spent;
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
       decoration: AppTheme.panel(
         background: AppTheme.paid.withValues(alpha: 0.06),
         outline: AppTheme.paid.withValues(alpha: 0.30),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Omzet ${range.label.toLowerCase()}',
-                  style: const TextStyle(fontSize: 11, color: Colors.black54),
-                ),
-                Text(
-                  Fmt.rupiah(s.omzet),
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w800,
-                    color: AppTheme.paid,
-                  ),
-                ),
-              ],
-            ),
+          Text(
+            'Rekap $label',
+            style: const TextStyle(fontSize: 11, color: Colors.black54),
           ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
+          const SizedBox(height: 6),
+          _line('Pemasukan', s.omzet, AppTheme.paid),
+          const SizedBox(height: 2),
+          _line('Pengeluaran', -spent, AppTheme.unpaid),
+          const Divider(height: 14),
+          Row(
+            children: [
+              const Text(
+                'BERSIH',
+                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
+              ),
+              const Spacer(),
+              Text(
+                Fmt.rupiah(net),
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                  // Bersih bisa MINUS kalau belanja hari itu melebihi omzet -
+                  // itu kabar penting, bukan angka yang perlu disamarkan.
+                  color: net < 0 ? AppTheme.unpaid : AppTheme.paid,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
             children: [
               Text(
-                '${s.orders} order',
-                style: const TextStyle(fontWeight: FontWeight.w700),
+                '${s.orders} order'
+                '${s.cancelled > 0 ? ' - ${s.cancelled} batal' : ''}',
+                style: const TextStyle(fontSize: 12, color: Colors.black54),
               ),
-              if (s.cancelled > 0)
-                Text(
-                  '${s.cancelled} dibatalkan',
-                  style: const TextStyle(fontSize: 11, color: AppTheme.unpaid),
-                ),
+              const Spacer(),
+              TextButton.icon(
+                onPressed: () => _openExpenses(context, ref),
+                icon: const Icon(Icons.receipt_long, size: 18),
+                label: const Text('Pengeluaran'),
+              ),
             ],
           ),
         ],
       ),
     );
+  }
+
+  Widget _line(String label, int amount, Color color) => Row(
+        children: [
+          Text(label, style: const TextStyle(fontSize: 13)),
+          const Spacer(),
+          Text(
+            (amount < 0 ? '- ' : '') + Fmt.rupiah(amount.abs()),
+            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: color),
+          ),
+        ],
+      );
+}
+
+/// Daftar pengeluaran periode terpilih, plus tombol tambah.
+Future<void> _openExpenses(BuildContext context, WidgetRef ref) async {
+  await ref.read(expensesProvider.notifier).refresh();
+  if (!context.mounted) return;
+  await showDialog<void>(context: context, builder: (_) => const _ExpensesDialog());
+}
+
+class _ExpensesDialog extends ConsumerWidget {
+  const _ExpensesDialog();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final list = ref.watch(expensesProvider).value ?? const <Expense>[];
+    final total = ref.watch(expenseTotalProvider);
+    final day = ref.watch(historyDayProvider);
+    final label = day != null
+        ? Fmt.dayOnly(day)
+        : ref.watch(historyRangeProvider).label.toLowerCase();
+
+    return AlertDialog(
+      title: Text('Pengeluaran $label'),
+      content: SizedBox(
+        width: context.dialogWidth(460),
+        height: 420,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: AppTheme.panel(
+                background: AppTheme.unpaid.withValues(alpha: 0.06),
+              ),
+              child: Row(
+                children: [
+                  const Text('Total', style: TextStyle(fontWeight: FontWeight.w700)),
+                  const Spacer(),
+                  Text(
+                    Fmt.rupiah(total),
+                    style: const TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w800,
+                      color: AppTheme.unpaid,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+            Expanded(
+              child: list.isEmpty
+                  ? const EmptyState(
+                      icon: Icons.receipt_long,
+                      title: 'Belum ada pengeluaran',
+                      subtitle: 'Catat belanja bahan, galon, gas, dan lainnya.',
+                    )
+                  : ListView.separated(
+                      itemCount: list.length,
+                      separatorBuilder: (_, __) => const Divider(height: 12),
+                      itemBuilder: (_, i) {
+                        final e = list[i];
+                        return Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    e.note,
+                                    style: const TextStyle(fontWeight: FontWeight.w600),
+                                  ),
+                                  Text(
+                                    Fmt.clock(e.spentAt) +
+                                        (e.createdBy == null ? '' : ' - ${e.createdBy}'),
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.black45,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Text(
+                              Fmt.rupiah(e.amount),
+                              style: const TextStyle(fontWeight: FontWeight.w700),
+                            ),
+                            IconButton(
+                              tooltip: 'Hapus',
+                              onPressed: () => _removeExpense(context, ref, e),
+                              icon: const Icon(Icons.delete_outline, size: 18),
+                              color: AppTheme.unpaid,
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Tutup')),
+        FilledButton.icon(
+          onPressed: () => _addExpense(context, ref),
+          icon: const Icon(Icons.add, size: 18),
+          label: const Text('Tambah'),
+        ),
+      ],
+    );
+  }
+}
+
+Future<void> _removeExpense(BuildContext context, WidgetRef ref, Expense e) async {
+  final ok = await confirmDialog(
+    context,
+    title: 'Hapus pengeluaran?',
+    message: '${e.note} - ${Fmt.rupiah(e.amount)}',
+    confirmLabel: 'Hapus',
+    destructive: true,
+  );
+  if (!ok || !context.mounted) return;
+  try {
+    await ref.read(expensesProvider.notifier).remove(e.id);
+  } on AppFailure catch (err) {
+    if (context.mounted) showSnack(context, err.message, error: true);
+  }
+}
+
+Future<void> _addExpense(BuildContext context, WidgetRef ref) async {
+  final note = TextEditingController();
+  final amount = TextEditingController();
+
+  final saved = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('Tambah Pengeluaran'),
+      content: SizedBox(
+        width: ctx.dialogWidth(420),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: note,
+              autofocus: true,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(
+                labelText: 'Untuk apa',
+                hintText: 'mis. belanja telur, galon, gas',
+              ),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: amount,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'Nominal', prefixText: 'Rp '),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Batal')),
+        FilledButton(
+          onPressed: () => Navigator.pop(ctx, true),
+          child: const Text('Simpan'),
+        ),
+      ],
+    ),
+  );
+
+  final value = int.tryParse(amount.text.replaceAll(RegExp(r'[^0-9]'), ''));
+  final text = note.text.trim();
+  note.dispose();
+  amount.dispose();
+
+  if (saved != true || !context.mounted) return;
+  if (text.isEmpty || value == null || value <= 0) {
+    showSnack(context, 'Keterangan dan nominal wajib diisi.', error: true);
+    return;
+  }
+
+  try {
+    await ref.read(expensesProvider.notifier).add(amount: value, note: text);
+    if (context.mounted) showSnack(context, 'Pengeluaran dicatat.');
+  } on AppFailure catch (err) {
+    if (context.mounted) showSnack(context, err.message, error: true);
+  }
+}
+
+/// dipilih hanya menghasilkan layar kosong yang membingungkan.
+Future<void> _pickDay(BuildContext context, WidgetRef ref) async {
+  final now = DateTime.now();
+  final picked = await showDatePicker(
+    context: context,
+    initialDate: ref.read(historyDayProvider) ?? now,
+    firstDate: DateTime(now.year - 2),
+    lastDate: now,
+    helpText: 'Lihat omzet tanggal',
+  );
+  if (picked != null) {
+    ref.read(historyDayProvider.notifier).select(picked);
   }
 }
 

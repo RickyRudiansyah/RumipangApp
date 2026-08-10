@@ -143,6 +143,11 @@ unzip -p RumipangKasir-v1.6.0.apk lib/arm64-v8a/libapp.so | grep -a -c "QRIS Lun
 | 1.4.0 | "Selesai" **per order** (bukan per meja), section **QRIS Lunas** |
 | 1.5.0 | Riwayat: filter 1/7/30 hari + omzet · HPP hanya owner |
 | 1.6.0 | Penyapu pembayaran QRIS yang tertinggal (~2 menit sekali) |
+| 1.6.1 | Status printer "menunggu giliran", bukan "Terputus" merah |
+| 1.7.0 | Variasi wajib (Rasa/Porsi tidak bisa "tanpa"), struk dapur tanpa harga, banner filter menu |
+| 1.8.0 | **Perbaikan:** struk tidak lagi tercetak ulang setelah app ditutup paksa · catatan per item · nama menu di jatah makan |
+| 1.9.0 | Pemilih tanggal di Riwayat |
+| 2.0.0 | Pengeluaran harian + rekap bersih (pemasukan − pengeluaran) |
 
 ---
 

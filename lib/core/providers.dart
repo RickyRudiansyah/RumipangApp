@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../data/catalog_repository.dart';
 import '../data/inventory_repository.dart';
 import '../data/menu_admin_repository.dart';
+import '../data/expense_repository.dart';
 import '../data/order_repository.dart';
 import '../data/print_repository.dart';
 import '../data/report_repository.dart';
@@ -29,6 +30,10 @@ final apiClientProvider = Provider<ApiClient>((ref) {
 
 final orderRepositoryProvider = Provider<OrderRepository>(
   (ref) => OrderRepository(ref.watch(apiClientProvider)),
+);
+
+final expenseRepositoryProvider = Provider<ExpenseRepository>(
+  (ref) => ExpenseRepository(ref.watch(apiClientProvider)),
 );
 
 final printRepositoryProvider = Provider<PrintRepository>(

@@ -36,6 +36,13 @@ class StaffMealRepository {
     return StaffMember.fromJson(Map<String, dynamic>.from(json as Map));
   }
 
+  /// Keluarkan karyawan dari daftar.
+  ///
+  /// Server menonaktifkannya (`is_active = false`), bukan menghapus barisnya -
+  /// riwayat jatah makannya memakai `ON DELETE CASCADE` dan akan ikut lenyap,
+  /// membuat biaya jatah bulan lalu berubah sendiri.
+  Future<void> deactivateStaff(String id) => _api.delete('/api/staff/$id');
+
   Future<StaffMember> updateStaff(
     String id, {
     required String name,

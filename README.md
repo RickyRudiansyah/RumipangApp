@@ -29,12 +29,13 @@ Rutenya sekarang **ada di repo web** — `app/api/ingredients`,
 `app/api/reports/menu-sales`, `app/api/staff`, `app/api/staff-meals`, dan
 `app/api/settings/theme`. Yang tersisa hanya urusan penerapan:
 
-- **deploy ulang web-nya**, dan
-- **jalankan migrasi SQL-nya** (`scripts/create-admin-features.sql`, lalu
-  `scripts/staff-optional-email.sql` untuk kelola karyawan).
+- **deploy ulang web-nya** setiap kali ada endpoint baru, dan
+- **jalankan migrasi SQL-nya** (daftar berurutan ada di README web).
 
-Kalau salah satu layar masih berkata "belum tersedia di server", curigai kedua
-hal itu lebih dulu — bukan kodenya. Kontrak lengkapnya (DDL + contoh JSON) tetap
+Per 8 Agustus 2026 seluruh migrasi **sudah terpasang** di database produksi —
+diverifikasi langsung, termasuk `expenses` dan peran karyawan bebas. Jadi kalau
+sebuah layar masih berkata "belum tersedia di server", curigai **deploy web**
+lebih dulu, bukan kodenya dan bukan migrasinya. Kontrak lengkapnya (DDL + contoh JSON) tetap
 di [docs/BACKEND-ADDITIONS.md](docs/BACKEND-ADDITIONS.md).
 
 Seluruh layar — Kasir, Order, Riwayat, Menu, Stok, Laporan, Jatah, Tema,
@@ -115,14 +116,14 @@ pernah terjadi.
 3. Salin:
    ```powershell
    Copy-Item "RumipangApp\build\app\outputs\flutter-apk\app-release.apk" `
-             "RumipangKasir-v1.6.0.apk"
+             "RumipangKasir-v2.2.0.apk"
    ```
 
 Memastikan sebuah APK benar-benar berisi perubahan, tanpa memasangnya —
 teks UI Dart ikut tertanam di `libapp.so`:
 
 ```bash
-unzip -p RumipangKasir-v1.6.0.apk lib/arm64-v8a/libapp.so | grep -a -c "QRIS Lunas"
+unzip -p RumipangKasir-v2.2.0.apk lib/arm64-v8a/libapp.so | grep -a -c "QRIS Lunas"
 ```
 
 `0` berarti APK itu build lama.
@@ -148,6 +149,8 @@ unzip -p RumipangKasir-v1.6.0.apk lib/arm64-v8a/libapp.so | grep -a -c "QRIS Lun
 | 1.8.0 | **Perbaikan:** struk tidak lagi tercetak ulang setelah app ditutup paksa · catatan per item · nama menu di jatah makan |
 | 1.9.0 | Pemilih tanggal di Riwayat |
 | 2.0.0 | Pengeluaran harian + rekap bersih (pemasukan − pengeluaran) |
+| 2.1.0 | Peran karyawan bebas (koki, barista…) · keluarkan karyawan · perbaikan gerbang login |
+| 2.2.0 | Rekap kas dipecah Tunai/QRIS + filter · riwayat jatah makan per karyawan (owner) |
 
 ---
 
@@ -174,7 +177,7 @@ lib/
 │   ├── admin/                   # menu & HPP: kategori, harga, margin, foto
 │   ├── inventory/               # stok bahan baku + alert ambang
 │   ├── reports/                 # menu terlaris & kurang laku, laba kotor
-│   ├── meals/                   # jatah makan karyawan (1x per orang per hari)
+│   ├── meals/                   # jatah makan (1x/hari) + riwayat per karyawan
 │   ├── settings/                # tema event, dipakai bersama web
 │   ├── printer/                 # SPP 2 stasiun, loop klaim-cetak-ACK, foreground service
 │   └── shell/                   # NavigationRail + siklus hidup layanan latar
@@ -270,10 +273,10 @@ Lima layar tambahan, semuanya butuh endpoint di
 | **Menu** | **HPP, margin, dan laba hanya terlihat oleh owner** (`canSeeCostProvider`) — kolomnya, chip-nya, peringatan "HPP belum diisi", judul layar, kolom input di dialog, sampai angka laba per menu di Laporan. Kasir melihat layar yang sama tanpa satu pun angka modal. Ini penjagaan **tampilan**, bukan keamanan: `cost_price` tetap ikut di respons `/api/menu`. Dikelompokkan per kategori. Tambah menu, kategori, dan topping/variasi berharga. Ubah harga, isi HPP, margin otomatis, foto menu (ambil → potong/putar → unggah). Menu yang dijual di bawah modal ditandai merah. |
 | **Stok** | Bahan baku + alert saat menyentuh ambang (default 20, bisa beda per bahan). Perubahan stok lewat "Sesuaikan" beserta alasannya, tidak pernah menimpa angka langsung. |
 | **Laporan** | Menu terlaris & kurang laku, omzet, dan — **khusus owner** — total HPP + laba kotor. Rentang hari ini / 7 hari / 30 hari. Jumlah kartunya berubah mengikuti peran, jadi tata letaknya **tidak boleh** memakai indeks tetap (`summaries[3]`) — itu crash begitu kartunya berkurang. |
-| **Jatah** | Jatah makan karyawan: **satu menu per orang per hari, bebas menu apa pun**. Menunya wajib dipilih (ada kolom cari), dan HPP tidak ditampilkan di layar ini — "HPP belum diisi" di sebelah nama menu membuatnya terbaca seperti menu bermasalah yang tidak boleh diambil. **Owner** bisa menambah karyawan dan mengubah namanya; kasir tidak melihat tombol itu. |
+| **Jatah** | Satu menu per orang per hari, bebas menu apa pun (menunya **wajib** dipilih, ada kolom cari). HPP tidak ditampilkan di layar ini. **Owner** bisa menambah, mengubah nama & peran, dan **mengeluarkan** karyawan — plus **Riwayat Jatah**: rekap 7/30/90 hari per karyawan, lengkap dengan menu apa saja yang ia ambil dan berapa kali. Kasir tidak melihat tombol-tombol itu. |
 | **Tema** | Tema event (Normal, Natal, Ramadan, Kemerdekaan, Imlek). Berlaku untuk aplikasi **dan** web. |
 | **Printer** | **Dua stasiun: Kasir & Dapur**, masing-masing printer sendiri, struknya sama persis. Satu order = satu job per stasiun (kolom `print_jobs.station` di server). Tiap kartu punya tombol Hubungkan · Tes Cetak · Ganti · Lupakan. |
-| **Riwayat** | Filter periode (Hari Ini · 7 Hari · 30 Hari · Semua) dengan **omzet** periode itu di atasnya. Omzet hanya menjumlahkan order **lunas & tidak dibatalkan** — menjumlahkan semua baris riwayat akan melaporkan uang yang tidak pernah diterima. Cari + cetak ulang struk, dan **hapus riwayat per hari / bulan / tahun** (atau semuanya). Jumlah order yang terdampak dihitung dari daftar yang sudah dimuat dan ditampilkan sebelum dikonfirmasi — penghapusannya permanen. |
+| **Riwayat** | **Rekap kas**: pemasukan (dipecah **Tunai / QRIS**) − pengeluaran = **bersih**, dengan filter periode (Hari Ini · 7 · 30 · Semua), **pemilih tanggal**, dan filter metode bayar. Tunai dan QRIS dipisah karena uangnya ada di dua tempat: laci dan rekening — angka gabungan tidak menjawab "isi laci harusnya berapa". Omzet hanya menjumlahkan order **lunas & tidak dibatalkan**. Pengeluaran harian bisa dicatat/dihapus di sini, dan tercatat pada **tanggal yang sedang dilihat**. Cari + cetak ulang struk, serta hapus riwayat per hari/bulan/tahun dengan jumlah terdampak ditampilkan sebelum dikonfirmasi. |
 
 Lima keputusan yang mudah dirusak tanpa sengaja:
 
@@ -378,7 +381,13 @@ Semuanya sudah diterapkan; ini catatan supaya tidak tidak sengaja dirusak nanti.
 10. **Perubahan stok lewat `delta`, bukan menimpa `stock_qty`.** Dua orang yang
    menyesuaikan stok bersamaan dengan PATCH akan saling menghapus.
 
-11. **Katalog tidak menyegarkan dirinya sendiri.** `menuProvider`,
+11. **`canUseApp` hanya memeriksa `isActive`, bukan daftar peran.** Owner boleh
+    membuat peran sendiri ("koki", "barista"), dan menuliskan
+    `isOwner || isCashier` di sini akan mengunci orangnya keluar dari aplikasi
+    begitu perannya diubah — tanpa pesan yang menjelaskan kenapa. Pembeda akses
+    yang sah cuma `isOwner`; peran lain semuanya berakses staff yang sama.
+
+12. **Katalog tidak menyegarkan dirinya sendiri.** `menuProvider`,
     `menuVariationsProvider`, `menuCategoriesProvider`, dan `tablesProvider`
     adalah `FutureProvider` yang menyimpan hasil pertamanya — menu yang
     ditambahkan dari dashboard web (atau dari tablet lain) tidak akan pernah

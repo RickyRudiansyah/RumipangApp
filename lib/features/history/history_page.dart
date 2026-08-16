@@ -125,6 +125,17 @@ class HistoryPage extends ConsumerWidget {
                         onTap: () => _pickDay(context, ref),
                       ),
                     ),
+                    const SizedBox(width: 8),
+                    for (final m in [null, PaymentMethod.cash, PaymentMethod.qris])
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: OptionChip(
+                          label: m == null ? 'Semua Bayar' : m.label,
+                          selected: ref.watch(historyMethodProvider) == m,
+                          onTap: () =>
+                              ref.read(historyMethodProvider.notifier).select(m),
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -190,7 +201,18 @@ class _HistorySummaryBar extends ConsumerWidget {
           ),
           const SizedBox(height: 6),
           _line('Pemasukan', s.omzet, AppTheme.paid),
-          const SizedBox(height: 2),
+          // Rinciannya penting saat mencocokkan kas: yang tunai harus ada di
+          // laci, yang QRIS harus ada di rekening.
+          Padding(
+            padding: const EdgeInsets.only(left: 12, top: 2),
+            child: Column(
+              children: [
+                _sub('Tunai', s.omzetCash),
+                _sub('QRIS', s.omzetQris),
+              ],
+            ),
+          ),
+          const SizedBox(height: 4),
           _line('Pengeluaran', -spent, AppTheme.unpaid),
           const Divider(height: 14),
           Row(
@@ -232,6 +254,17 @@ class _HistorySummaryBar extends ConsumerWidget {
       ),
     );
   }
+
+  Widget _sub(String label, int amount) => Row(
+        children: [
+          Text(label, style: const TextStyle(fontSize: 12, color: Colors.black54)),
+          const Spacer(),
+          Text(
+            Fmt.rupiah(amount),
+            style: const TextStyle(fontSize: 12, color: Colors.black54),
+          ),
+        ],
+      );
 
   Widget _line(String label, int amount, Color color) => Row(
         children: [

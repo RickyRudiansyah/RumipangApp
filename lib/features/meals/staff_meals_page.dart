@@ -10,6 +10,7 @@ import '../../shared/theme.dart';
 import '../../shared/widgets.dart';
 import '../auth/staff_provider.dart';
 import '../new_order/catalog_provider.dart';
+import 'meal_history_page.dart';
 import 'meals_provider.dart';
 
 /// Jatah makan karyawan: satu kali per orang per hari.
@@ -49,6 +50,16 @@ class StaffMealsPage extends ConsumerWidget {
               // Menambah karyawan mengubah siapa yang berhak jatah makan -
               // itu keputusan pemilik, bukan kasir.
               if (ref.watch(staffProvider).value?.isOwner ?? false) ...[
+                // Layar ini hanya menampilkan hari ini. Pertanyaan "selama ini
+                // Muis ambil apa saja" butuh rentang, dan itu urusan pemilik.
+                OutlinedButton.icon(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(builder: (_) => const MealHistoryPage()),
+                  ),
+                  icon: const Icon(Icons.history, size: 18),
+                  label: Text(context.isCompact ? 'Riwayat' : 'Riwayat Jatah'),
+                ),
+                const SizedBox(width: 10),
                 OutlinedButton.icon(
                   onPressed: () => _openStaffEditor(context, ref, null),
                   icon: const Icon(Icons.person_add_alt, size: 18),
@@ -323,9 +334,23 @@ class _StaffEditorDialogState extends ConsumerState<_StaffEditorDialog> {
 
   bool get _isNew => widget.existing == null;
 
-  /// `koki` sengaja tidak ditawarkan - dapur sudah dipensiunkan
-  /// (BACKEND-ADDITIONS.md §7). Baris lama berperan koki tetap valid.
-  static const _roles = ['cashier', 'owner'];
+  /// Peran bawaan yang selalu ditawarkan. Owner boleh menambah sendiri lewat
+  /// tombol "Peran baru", dan peran yang sudah dipakai karyawan lain ikut
+  /// muncul otomatis - lihat [_roleOptions].
+  ///
+  /// Yang penting dipahami: **hanya `owner` yang punya arti keamanan.** Peran
+  /// lain apa pun (cashier, koki, barista) mendapat akses staff yang sama.
+  /// Menambah peran = menambah label, bukan tingkat akses baru.
+  static const _baseRoles = ['cashier', 'owner'];
+
+  /// Peran bawaan + peran yang sudah dipakai karyawan lain + peran yang baru
+  /// diketik owner di sesi ini.
+  List<String> _roleOptions(List<StaffMember> staff) {
+    final all = <String>{..._baseRoles, ...staff.map((e) => e.role)};
+    if (_role.isNotEmpty) all.add(_role);
+    final list = all.where((e) => e.isNotEmpty).toList()..sort();
+    return list;
+  }
 
   @override
   void initState() {
@@ -333,7 +358,7 @@ class _StaffEditorDialogState extends ConsumerState<_StaffEditorDialog> {
     final e = widget.existing;
     _name = TextEditingController(text: e?.name ?? '');
     _email = TextEditingController(text: e?.email ?? '');
-    _role = _roles.contains(e?.role) ? e!.role : 'cashier';
+    _role = (e?.role.isNotEmpty ?? false) ? e!.role : 'cashier';
   }
 
   @override
@@ -369,20 +394,43 @@ class _StaffEditorDialogState extends ConsumerState<_StaffEditorDialog> {
               ),
             ),
             const SizedBox(height: 14),
-            Row(
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: Text('Peran', style: TextStyle(fontWeight: FontWeight.w600)),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
               children: [
-                const Text('Peran', style: TextStyle(fontWeight: FontWeight.w600)),
-                const SizedBox(width: 14),
-                for (final r in _roles) ...[
+                for (final r in _roleOptions(
+                  ref.watch(staffListProvider).value ?? const <StaffMember>[],
+                ))
                   OptionChip(
-                    label: r == 'owner' ? 'Owner' : 'Kasir',
+                    label: _roleLabel(r),
                     selected: _role == r,
                     onTap: () => setState(() => _role = r),
                   ),
-                  const SizedBox(width: 8),
-                ],
+                OutlinedButton.icon(
+                  onPressed: _addRole,
+                  icon: const Icon(Icons.add, size: 16),
+                  label: const Text('Peran baru'),
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size(0, 44),
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                  ),
+                ),
               ],
             ),
+            if (_role != 'owner') ...[
+              const SizedBox(height: 8),
+              const Text(
+                'Semua peran selain Owner punya akses yang sama. Hanya Owner '
+                'yang bisa melihat HPP dan mengelola karyawan.',
+                style: TextStyle(fontSize: 11, color: Colors.black45),
+              ),
+            ],
             const SizedBox(height: 12),
             const Text(
               'Menambah karyawan di sini membuatnya bisa menerima jatah makan. '
@@ -397,6 +445,15 @@ class _StaffEditorDialogState extends ConsumerState<_StaffEditorDialog> {
         ),
       ),
       actions: [
+        // Hanya untuk karyawan yang sudah ada. Ditaruh paling kiri, jauh dari
+        // tombol Simpan.
+        if (!_isNew)
+          TextButton(
+            onPressed: _saving ? null : _deactivate,
+            style: TextButton.styleFrom(foregroundColor: AppTheme.unpaid),
+            child: const Text('Keluarkan'),
+          ),
+        const Spacer(),
         TextButton(
           onPressed: _saving ? null : () => Navigator.pop(context),
           child: const Text('Batal'),
@@ -409,7 +466,82 @@ class _StaffEditorDialogState extends ConsumerState<_StaffEditorDialog> {
               : Text(_isNew ? 'Tambah' : 'Simpan'),
         ),
       ],
+      actionsAlignment: MainAxisAlignment.spaceBetween,
     );
+  }
+
+  static String _roleLabel(String r) =>
+      r.isEmpty ? r : r[0].toUpperCase() + r.substring(1);
+
+  Future<void> _addRole() async {
+    final controller = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Peran Baru'),
+        content: SizedBox(
+          width: ctx.dialogWidth(360),
+          child: TextField(
+            controller: controller,
+            autofocus: true,
+            maxLength: 30,
+            decoration: const InputDecoration(
+              labelText: 'Nama peran',
+              hintText: 'mis. koki, barista, pramusaji',
+            ),
+            onSubmitted: (v) => Navigator.pop(ctx, v.trim()),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Batal')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text('Pakai'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+
+    final clean = (name ?? '').trim().toLowerCase();
+    if (clean.isEmpty || !mounted) return;
+    // Disaring sama dengan server, supaya penolakannya terjadi di sini -
+    // bukan setelah owner menekan Simpan.
+    if (!RegExp(r'^[a-z0-9 _-]+$').hasMatch(clean)) {
+      showSnack(context, 'Peran hanya boleh huruf, angka, spasi, - dan _', error: true);
+      return;
+    }
+    setState(() => _role = clean);
+  }
+
+  Future<void> _deactivate() async {
+    final person = widget.existing!;
+    final ok = await confirmDialog(
+      context,
+      title: 'Keluarkan ${person.name}?',
+      message: 'Namanya hilang dari daftar karyawan dan dari jatah makan. '
+          'Riwayat jatah makannya tetap tersimpan, jadi biaya bulan-bulan lalu '
+          'tidak berubah.',
+      confirmLabel: 'Keluarkan',
+      destructive: true,
+    );
+    if (!ok || !mounted) return;
+
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      await ref.read(staffMealRepositoryProvider).deactivateStaff(person.id);
+      if (mounted) Navigator.pop(context, true);
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _saving = false;
+          _error = error.toString().replaceFirst('Exception: ', '');
+        });
+      }
+    }
   }
 
   Future<void> _save() async {

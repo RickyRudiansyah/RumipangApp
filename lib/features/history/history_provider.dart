@@ -87,6 +87,20 @@ class HistoryDayNotifier extends Notifier<DateTime?> {
 final historyDayProvider =
     NotifierProvider<HistoryDayNotifier, DateTime?>(HistoryDayNotifier.new);
 
+/// Saring rekap per metode bayar. `null` = semua.
+///
+/// Uang tunai ada di laci, uang QRIS ada di rekening - saat mencocokkan kas
+/// akhir hari, keduanya dihitung terpisah dan angka gabungan justru menyesatkan.
+class HistoryMethodNotifier extends Notifier<PaymentMethod?> {
+  @override
+  PaymentMethod? build() => null;
+
+  void select(PaymentMethod? method) => state = method;
+}
+
+final historyMethodProvider =
+    NotifierProvider<HistoryMethodNotifier, PaymentMethod?>(HistoryMethodNotifier.new);
+
 final filteredHistoryProvider = Provider<List<OrderModel>>((ref) {
   final all = ref.watch(historyProvider).value ?? const <OrderModel>[];
   final query = ref.watch(historyQueryProvider).trim().toLowerCase();
@@ -95,9 +109,12 @@ final filteredHistoryProvider = Provider<List<OrderModel>>((ref) {
   // Tanggal tertentu punya batas atas; rentang "N hari terakhir" tidak.
   final until = day?.add(const Duration(days: 1));
 
+  final method = ref.watch(historyMethodProvider);
+
   return all.where((o) {
     if (since != null && o.createdAt.isBefore(since)) return false;
     if (until != null && !o.createdAt.isBefore(until)) return false;
+    if (method != null && o.paymentMethod != method) return false;
     if (query.isEmpty) return true;
     return o.orderNo.toLowerCase().contains(query) ||
         o.tableLabel.toLowerCase().contains(query) ||
@@ -166,6 +183,8 @@ class HistorySummary {
   const HistorySummary({
     required this.orders,
     required this.omzet,
+    required this.omzetCash,
+    required this.omzetQris,
     required this.cancelled,
   });
 
@@ -176,23 +195,37 @@ class HistorySummary {
   /// dalam omzet - angka yang lebih besar dari uang yang benar-benar diterima.
   final int omzet;
 
+  /// Dipecah karena uangnya ada di dua tempat berbeda: tunai di laci, QRIS di
+  /// rekening. Saat mencocokkan kas akhir hari, angka gabungan tidak menjawab
+  /// pertanyaan "isi laci harusnya berapa".
+  final int omzetCash;
+  final int omzetQris;
+
   final int cancelled;
 }
 
 final historySummaryProvider = Provider<HistorySummary>((ref) {
   final orders = ref.watch(filteredHistoryProvider);
-  var omzet = 0;
+  var cash = 0;
+  var qris = 0;
   var cancelled = 0;
   for (final o in orders) {
     if (o.status == OrderStatus.cancelled) {
       cancelled++;
       continue;
     }
-    if (o.paymentStatus.isPaid) omzet += o.totalAmount;
+    if (!o.paymentStatus.isPaid) continue;
+    if (o.paymentMethod == PaymentMethod.qris) {
+      qris += o.totalAmount;
+    } else {
+      cash += o.totalAmount;
+    }
   }
   return HistorySummary(
     orders: orders.length,
-    omzet: omzet,
+    omzet: cash + qris,
+    omzetCash: cash,
+    omzetQris: qris,
     cancelled: cancelled,
   );
 });

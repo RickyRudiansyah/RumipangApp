@@ -34,6 +34,14 @@ class StaffIdentity {
   bool get isOwner => role == 'owner';
   bool get isCashier => role == 'cashier';
 
-  /// Role yang diizinkan memakai aplikasi kasir.
-  bool get canUseApp => isActive && (isOwner || isCashier);
+  /// Boleh memakai aplikasi kasir.
+  ///
+  /// **Semua role aktif boleh masuk** - yang membedakan hanya apa yang mereka
+  /// lihat di dalamnya (`isOwner` menjaga HPP, laba, dan kelola karyawan).
+  ///
+  /// Dulu di sini tertulis `isOwner || isCashier`, dan itu jadi ranjau begitu
+  /// owner boleh membuat role sendiri: mengubah peran seseorang jadi "koki"
+  /// diam-diam mengunci dia keluar dari aplikasi, tanpa pesan yang menjelaskan
+  /// kenapa.
+  bool get canUseApp => isActive;
 }
